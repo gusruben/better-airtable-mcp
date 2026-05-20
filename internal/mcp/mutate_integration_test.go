@@ -168,7 +168,7 @@ func TestMutateApprovalFlowOverMCP(t *testing.T) {
 		BaseURL:           mustParseTestURL(t, "http://example.test"),
 		SyncInterval:      time.Minute,
 		SyncTTL:           10 * time.Minute,
-		ApprovalTTL:       10 * time.Minute,
+		ApprovalTTL:       60 * time.Minute,
 		QueryDefaultLimit: 100,
 		QueryMaxLimit:     1000,
 	}
@@ -437,7 +437,7 @@ func TestMutateApprovalFlowLogsWithoutLeakingPayloadValues(t *testing.T) {
 		BaseURL:           mustParseTestURL(t, "http://example.test"),
 		SyncInterval:      time.Minute,
 		SyncTTL:           10 * time.Minute,
-		ApprovalTTL:       10 * time.Minute,
+		ApprovalTTL:       60 * time.Minute,
 		QueryDefaultLimit: 100,
 		QueryMaxLimit:     1000,
 	}
@@ -605,7 +605,7 @@ func TestCheckOperationRejectsMutationStatusForDifferentUser(t *testing.T) {
 		BaseURL:           mustParseTestURL(t, "http://example.test"),
 		SyncInterval:      time.Minute,
 		SyncTTL:           10 * time.Minute,
-		ApprovalTTL:       10 * time.Minute,
+		ApprovalTTL:       60 * time.Minute,
 		QueryDefaultLimit: 100,
 		QueryMaxLimit:     1000,
 	}
@@ -790,7 +790,7 @@ func TestMutateCreateRecordsAcceptsOriginalAirtableFieldNamesOverMCP(t *testing.
 		BaseURL:           mustParseTestURL(t, "http://example.test"),
 		SyncInterval:      time.Minute,
 		SyncTTL:           10 * time.Minute,
-		ApprovalTTL:       10 * time.Minute,
+		ApprovalTTL:       60 * time.Minute,
 		QueryDefaultLimit: 100,
 		QueryMaxLimit:     1000,
 	}
@@ -996,7 +996,7 @@ func TestMutateDeleteRecordIDsOverMCP(t *testing.T) {
 		BaseURL:           mustParseTestURL(t, "http://example.test"),
 		SyncInterval:      time.Minute,
 		SyncTTL:           10 * time.Minute,
-		ApprovalTTL:       10 * time.Minute,
+		ApprovalTTL:       60 * time.Minute,
 		QueryDefaultLimit: 100,
 		QueryMaxLimit:     1000,
 	}
@@ -1162,7 +1162,7 @@ func TestMutateReturnsNotReadyWhenTargetRecordHasNotSyncedYetOverMCP(t *testing.
 		BaseURL:           mustParseTestURL(t, "http://example.test"),
 		SyncInterval:      time.Minute,
 		SyncTTL:           10 * time.Minute,
-		ApprovalTTL:       10 * time.Minute,
+		ApprovalTTL:       60 * time.Minute,
 		QueryDefaultLimit: 100,
 		QueryMaxLimit:     1000,
 	}

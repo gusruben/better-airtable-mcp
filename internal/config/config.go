@@ -14,7 +14,7 @@ const (
 	defaultDuckDBDataDir     = "/data/duckdb"
 	defaultSyncInterval      = 60 * time.Second
 	defaultSyncTTL           = 10 * time.Minute
-	defaultApprovalTTL       = 10 * time.Minute
+	defaultApprovalTTL       = 60 * time.Minute
 	defaultQueryLimit        = 100
 	defaultQueryMaxLimit     = 1000
 	requiredEncryptionKeyLen = 32
