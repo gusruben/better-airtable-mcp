@@ -10,7 +10,7 @@ Better Airtable MCP is a hosted MCP (Model Context Protocol) server that gives A
 - **Language**: Go
 - **Transport**: MCP Streamable HTTP (spec 2025-11-25)
 - **Hosting**: Coolify (Docker), persistent disk for DuckDB files (wiped on redeploy)
-- **Durable storage**: Postgres (OAuth tokens, pending approvals, user records)
+- **Durable storage**: Postgres (OAuth tokens, MCP refresh tokens, pending approvals, user records)
 
 ---
 
@@ -69,8 +69,8 @@ This service participates in two OAuth flows chained together:
 5. User authorizes "Better Airtable MCP" on Airtable
 6. Airtable redirects back to our callback with an authorization code
 7. We exchange the code for Airtable access + refresh tokens, store them in Postgres
-8. We complete our own OAuth flow, minting a bearer token for the MCP client
-9. The MCP client uses our bearer token on every subsequent request
+8. We complete our own OAuth flow, minting an MCP bearer token plus an MCP refresh token for the MCP client
+9. The MCP client uses our bearer token on every subsequent request and can refresh it via `POST /oauth/token`
 
 **Our service acts as:**
 - **OAuth Provider** for MCP clients (we issue bearer tokens)
@@ -96,7 +96,21 @@ Airtable refresh tokens are **single-use with rotation**. Using a refresh token 
 - **Atomic persistence**: New `(access_token, refresh_token, expires_at)` tuple is written to Postgres in a single transaction
 - **Failure handling**: If a refresh fails with `invalid_grant`, mark the user as needing re-authorization. The next MCP request returns an error instructing the agent to tell the user to re-authenticate
 
-### 2.4 MCP OAuth Endpoints
+### 2.4 MCP OAuth Token Issuance and Refresh
+
+The MCP-facing OAuth provider issues tokens that are separate from the Airtable tokens we hold for users.
+
+- **Access token TTL**: 24 hours
+- **Refresh token TTL**: 30 days
+- **Access token storage**: only the SHA-256 hash is stored in `mcp_tokens`
+- **Refresh token storage**: only the SHA-256 hash is stored in `mcp_refresh_tokens`; raw refresh tokens are returned once to the client and never logged
+- **Refresh semantics**: MCP refresh tokens are single-use. A successful `grant_type=refresh_token` exchange atomically deletes the submitted refresh token row and issues a new access token plus a rotated refresh token.
+- **Restart/redeploy behavior**: MCP refresh grants must be durable in Postgres, not process memory, so clients can refresh across Coolify deploys and app restarts.
+- **Client binding**: If the refresh request supplies `client_id`, it must match the `client_id` stored with the refresh token.
+- **Failure handling**: Missing, expired, already-consumed, or client-mismatched refresh tokens return OAuth `invalid_grant`; the MCP client must reconnect or re-authorize.
+- **Cleanup**: The OAuth cleanup loop prunes expired MCP refresh token rows.
+
+### 2.5 MCP OAuth Endpoints
 
 | Endpoint | Purpose |
 |---|---|
@@ -839,13 +853,25 @@ CREATE TABLE airtable_tokens (
   refresh_token_ciphertext BYTEA NOT NULL,  -- app-level encrypted
   expires_at               TIMESTAMPTZ NOT NULL,
   scopes                   TEXT NOT NULL,
-  updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reauth_required_at       TIMESTAMPTZ
 );
 
--- MCP session tokens (what we issue to MCP clients)
+-- MCP access tokens (what MCP clients send as bearer tokens)
 CREATE TABLE mcp_tokens (
   token_hash        TEXT PRIMARY KEY,     -- SHA-256 of the bearer token
   user_id           TEXT NOT NULL REFERENCES users(id),
+  client_id         TEXT,
+  client_name       TEXT,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at        TIMESTAMPTZ NOT NULL
+);
+
+-- MCP refresh tokens (what MCP clients exchange for rotated bearer tokens)
+CREATE TABLE mcp_refresh_tokens (
+  token_hash        TEXT PRIMARY KEY,     -- SHA-256 of the refresh token
+  user_id           TEXT NOT NULL REFERENCES users(id),
+  client_id         TEXT NOT NULL,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   expires_at        TIMESTAMPTZ NOT NULL
 );
@@ -900,7 +926,7 @@ CREATE TABLE oauth_clients (
 
 - Airtable access tokens, refresh tokens, and pending operation payloads are encrypted at the application layer before writing to Postgres
 - The encryption key is supplied via environment variable and never written to disk
-- MCP bearer tokens are never stored in plaintext; only a hash is stored
+- MCP bearer and refresh tokens are never stored in plaintext; only SHA-256 hashes are stored
 - Server logs must never include Airtable tokens or decrypted mutation payloads
 - Server logs must never include OAuth authorization codes, OAuth state values, PKCE verifiers, client secrets, raw request bodies, raw query strings, Airtable request bodies, raw approval URLs, or raw approval `op_...` identifiers
 - Structured logging for mutation requests must log only IDs, counts, hashes, statuses, and sanitized previews; it must never log decrypted field values or approval payload contents
@@ -1134,6 +1160,8 @@ All configuration via environment variables:
 |---|---|
 | Airtable token expired, refresh succeeds | Transparent to user |
 | Airtable token expired, refresh fails | Return error; agent tells user to re-authenticate |
+| MCP access token expired, refresh token valid | Rotate MCP refresh token and return a new MCP access token transparently to the client |
+| MCP refresh token missing, expired, already consumed, or client-mismatched | Return OAuth `invalid_grant`; client must reconnect or re-authorize |
 | Initial sync fails mid-way | Keep the partial snapshot and mark sync status as failed; retry on next interval or manual sync |
 | Refresh fails mid-way after a base already has a complete snapshot | Retain the previous complete DuckDB state; discard staging DB; emit a structured sanitized log event; retry on next interval |
 | Query on a base with no local snapshot yet | Initialize schema immediately, start a background sync, and execute against the currently visible subset |
