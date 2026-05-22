@@ -84,19 +84,15 @@ func TestOAuthProviderEndToEnd(t *testing.T) {
 		AirtableClientID:     cfgClientID,
 		AirtableClientSecret: cfgClientSecret,
 	}
-	handler := NewHandler(
-		cfg,
-		store,
-		secret,
-		NewAirtableOAuthClient(
-			cfgClientID,
-			cfgClientSecret,
-			cfg.BaseURLString()+"/oauth/airtable/callback",
-			airtableTokenServer.Client(),
-			airtableTokenServer.URL+"/oauth2/v1/authorize",
-			airtableTokenServer.URL+"/oauth2/v1/token",
-		),
+	airtableClient := NewAirtableOAuthClient(
+		cfgClientID,
+		cfgClientSecret,
+		cfg.BaseURLString()+"/oauth/airtable/callback",
+		airtableTokenServer.Client(),
+		airtableTokenServer.URL+"/oauth2/v1/authorize",
+		airtableTokenServer.URL+"/oauth2/v1/token",
 	)
+	handler := NewHandler(cfg, store, secret, airtableClient)
 
 	registerRecorder := httptest.NewRecorder()
 	registerRequest := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(`{"redirect_uris":["https://client.example/callback"],"client_name":"Test Client"}`))
@@ -193,7 +189,8 @@ func TestOAuthProviderEndToEnd(t *testing.T) {
 		"refresh_token": {refreshToken},
 	}.Encode()))
 	refreshRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	handler.Token(refreshRecorder, refreshRequest)
+	restartedHandler := NewHandler(cfg, store, secret, airtableClient)
+	restartedHandler.Token(refreshRecorder, refreshRequest)
 	if refreshRecorder.Code != http.StatusOK {
 		t.Fatalf("expected refresh token exchange to return 200, got %d with body %s", refreshRecorder.Code, refreshRecorder.Body.String())
 	}

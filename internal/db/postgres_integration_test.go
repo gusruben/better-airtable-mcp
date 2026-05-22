@@ -223,6 +223,56 @@ func TestStoreMigrateAndRoundTripRecords(t *testing.T) {
 		t.Fatalf("unexpected mcp token client name %#v", mcpToken)
 	}
 
+	refreshNow := time.Now().UTC()
+	if err := store.PutMCPRefreshToken(ctx, MCPRefreshTokenRecord{
+		TokenHash: "refresh_hash_123",
+		UserID:    "user_1",
+		ClientID:  "client_123",
+		CreatedAt: refreshNow,
+		ExpiresAt: refreshNow.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("PutMCPRefreshToken() returned error: %v", err)
+	}
+
+	refreshRecord, ok, err := store.ConsumeMCPRefreshToken(ctx, "refresh_hash_123", refreshNow)
+	if err != nil {
+		t.Fatalf("ConsumeMCPRefreshToken() returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected refresh token to be consumed")
+	}
+	if refreshRecord.UserID != "user_1" || refreshRecord.ClientID != "client_123" {
+		t.Fatalf("unexpected refresh token record %#v", refreshRecord)
+	}
+
+	if _, ok, err := store.ConsumeMCPRefreshToken(ctx, "refresh_hash_123", refreshNow); err != nil {
+		t.Fatalf("ConsumeMCPRefreshToken() second call returned error: %v", err)
+	} else if ok {
+		t.Fatal("expected consumed refresh token to be single-use")
+	}
+
+	if err := store.PutMCPRefreshToken(ctx, MCPRefreshTokenRecord{
+		TokenHash: "expired_refresh_hash_123",
+		UserID:    "user_1",
+		ClientID:  "client_123",
+		CreatedAt: refreshNow.Add(-2 * time.Hour),
+		ExpiresAt: refreshNow.Add(-time.Hour),
+	}); err != nil {
+		t.Fatalf("PutMCPRefreshToken() for expired token returned error: %v", err)
+	}
+	if _, ok, err := store.ConsumeMCPRefreshToken(ctx, "expired_refresh_hash_123", refreshNow); err != nil {
+		t.Fatalf("ConsumeMCPRefreshToken() expired call returned error: %v", err)
+	} else if ok {
+		t.Fatal("expected expired refresh token not to be consumed")
+	}
+	removedRefreshTokens, err := store.PruneExpiredMCPRefreshTokens(ctx, refreshNow)
+	if err != nil {
+		t.Fatalf("PruneExpiredMCPRefreshTokens() returned error: %v", err)
+	}
+	if removedRefreshTokens != 1 {
+		t.Fatalf("expected one expired refresh token to be pruned, got %d", removedRefreshTokens)
+	}
+
 	if err := store.UpsertUserBaseAccess(ctx, UserBaseAccess{
 		UserID:          "user_1",
 		BaseID:          "app123",

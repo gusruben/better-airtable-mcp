@@ -39,6 +39,14 @@ type MCPTokenRecord struct {
 	ExpiresAt  time.Time
 }
 
+type MCPRefreshTokenRecord struct {
+	TokenHash string
+	UserID    string
+	ClientID  string
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
 type UserBaseAccess struct {
 	UserID          string
 	BaseID          string
@@ -130,6 +138,13 @@ func (s *Store) Migrate(ctx context.Context) error {
 			user_id TEXT NOT NULL REFERENCES users(id),
 			client_id TEXT,
 			client_name TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			expires_at TIMESTAMPTZ NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS mcp_refresh_tokens (
+			token_hash TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id),
+			client_id TEXT NOT NULL,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			expires_at TIMESTAMPTZ NOT NULL
 		)`,
@@ -342,6 +357,50 @@ func (s *Store) GetMCPToken(ctx context.Context, tokenHash string) (MCPTokenReco
 		return MCPTokenRecord{}, fmt.Errorf("get mcp token: %w", err)
 	}
 	return record, nil
+}
+
+func (s *Store) PutMCPRefreshToken(ctx context.Context, record MCPRefreshTokenRecord) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO mcp_refresh_tokens (token_hash, user_id, client_id, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (token_hash) DO UPDATE
+		SET user_id = EXCLUDED.user_id,
+		    client_id = EXCLUDED.client_id,
+		    created_at = EXCLUDED.created_at,
+		    expires_at = EXCLUDED.expires_at
+	`, record.TokenHash, record.UserID, record.ClientID, record.CreatedAt, record.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("put mcp refresh token: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ConsumeMCPRefreshToken(ctx context.Context, tokenHash string, now time.Time) (MCPRefreshTokenRecord, bool, error) {
+	var record MCPRefreshTokenRecord
+	err := s.pool.QueryRow(ctx, `
+		DELETE FROM mcp_refresh_tokens
+		WHERE token_hash = $1
+		  AND expires_at > $2
+		RETURNING token_hash, user_id, client_id, created_at, expires_at
+	`, tokenHash, now).Scan(&record.TokenHash, &record.UserID, &record.ClientID, &record.CreatedAt, &record.ExpiresAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return MCPRefreshTokenRecord{}, false, nil
+		}
+		return MCPRefreshTokenRecord{}, false, fmt.Errorf("consume mcp refresh token: %w", err)
+	}
+	return record, true, nil
+}
+
+func (s *Store) PruneExpiredMCPRefreshTokens(ctx context.Context, now time.Time) (int64, error) {
+	commandTag, err := s.pool.Exec(ctx, `
+		DELETE FROM mcp_refresh_tokens
+		WHERE expires_at <= $1
+	`, now)
+	if err != nil {
+		return 0, fmt.Errorf("prune expired mcp refresh tokens: %w", err)
+	}
+	return commandTag.RowsAffected(), nil
 }
 
 func (s *Store) UpsertUserBaseAccess(ctx context.Context, record UserBaseAccess) error {

@@ -27,10 +27,9 @@ type Handler struct {
 	airtable *AirtableOAuthClient
 	now      func() time.Time
 
-	mu            sync.Mutex
-	authRequests  map[string]authorizationRequest
-	authCodes     map[string]authorizationCode
-	refreshGrants map[string]refreshGrant
+	mu           sync.Mutex
+	authRequests map[string]authorizationRequest
+	authCodes    map[string]authorizationCode
 
 	mcpTokenTTL        time.Duration
 	mcpRefreshTokenTTL time.Duration
@@ -52,12 +51,6 @@ type authorizationCode struct {
 	UserID        string
 	CodeChallenge string
 	ExpiresAt     time.Time
-}
-
-type refreshGrant struct {
-	ClientID  string
-	UserID    string
-	ExpiresAt time.Time
 }
 
 type registerRequest struct {
@@ -85,7 +78,6 @@ func NewHandler(cfg config.Config, store *db.Store, cipher *cryptoutil.Cipher, a
 		now:                time.Now,
 		authRequests:       make(map[string]authorizationRequest),
 		authCodes:          make(map[string]authorizationCode),
-		refreshGrants:      make(map[string]refreshGrant),
 		mcpTokenTTL:        24 * time.Hour,
 		mcpRefreshTokenTTL: 30 * 24 * time.Hour,
 	}
@@ -534,7 +526,17 @@ func (h *Handler) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	grant, ok := h.consumeRefreshGrant(refreshToken)
+	grant, ok, err := h.store.ConsumeMCPRefreshToken(r.Context(), hashToken(refreshToken), h.now().UTC())
+	if err != nil {
+		logx.Event(r.Context(), "oauth_handler", "oauth.token_exchange_failed",
+			"grant_type", "refresh_token",
+			"client_id", clientID,
+			"error_kind", logx.ErrorKind(err),
+			"error_message", logx.ErrorPreview(err),
+		)
+		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if !ok {
 		logx.Event(r.Context(), "oauth_handler", "oauth.token_exchange_failed",
 			"grant_type", "refresh_token",
@@ -659,14 +661,15 @@ func (h *Handler) issueMCPToken(ctx context.Context, userID, clientID string) (s
 		return "", "", time.Time{}, err
 	}
 
-	h.mu.Lock()
-	h.pruneExpiredLocked(h.now().UTC())
-	h.refreshGrants[refreshToken] = refreshGrant{
-		ClientID:  clientID,
+	if err := h.store.PutMCPRefreshToken(ctx, db.MCPRefreshTokenRecord{
+		TokenHash: hashToken(refreshToken),
 		UserID:    userID,
-		ExpiresAt: h.now().Add(h.mcpRefreshTokenTTL),
+		ClientID:  clientID,
+		CreatedAt: h.now().UTC(),
+		ExpiresAt: h.now().Add(h.mcpRefreshTokenTTL).UTC(),
+	}); err != nil {
+		return "", "", time.Time{}, err
 	}
-	h.mu.Unlock()
 
 	logx.Event(ctx, "oauth_handler", "oauth.token_issued",
 		"user_id", userID,
@@ -706,21 +709,6 @@ func (h *Handler) consumeAuthorizationCode(code string) (authorizationCode, bool
 	return authCode, true
 }
 
-func (h *Handler) consumeRefreshGrant(refreshToken string) (refreshGrant, bool) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	now := h.now().UTC()
-	h.pruneExpiredLocked(now)
-	grant, ok := h.refreshGrants[refreshToken]
-	if !ok || now.After(grant.ExpiresAt) {
-		delete(h.refreshGrants, refreshToken)
-		return refreshGrant{}, false
-	}
-	delete(h.refreshGrants, refreshToken)
-	return grant, true
-}
-
 func (h *Handler) RunCleanupLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -735,6 +723,21 @@ func (h *Handler) RunCleanupLoop(ctx context.Context, interval time.Duration) {
 				logx.Event(ctx, "oauth_handler", "oauth.state_pruned",
 					"removed_entries", removed,
 				)
+			}
+			if h.store != nil {
+				removedRefreshTokens, err := h.store.PruneExpiredMCPRefreshTokens(ctx, h.now().UTC())
+				if err != nil {
+					logx.Event(ctx, "oauth_handler", "oauth.refresh_token_prune_failed",
+						"error_kind", logx.ErrorKind(err),
+						"error_message", logx.ErrorPreview(err),
+					)
+					continue
+				}
+				if removedRefreshTokens > 0 {
+					logx.Event(ctx, "oauth_handler", "oauth.refresh_tokens_pruned",
+						"removed_entries", removedRefreshTokens,
+					)
+				}
 			}
 		}
 	}
@@ -758,12 +761,6 @@ func (h *Handler) pruneExpiredLocked(now time.Time) int {
 	for code, authCode := range h.authCodes {
 		if !now.Before(authCode.ExpiresAt) {
 			delete(h.authCodes, code)
-			removed++
-		}
-	}
-	for token, grant := range h.refreshGrants {
-		if !now.Before(grant.ExpiresAt) {
-			delete(h.refreshGrants, token)
 			removed++
 		}
 	}

@@ -18,15 +18,11 @@ func TestHandlerPruneExpiredStateRemovesExpiredEntries(t *testing.T) {
 			"expired-code": {ExpiresAt: now.Add(-time.Second)},
 			"fresh-code":   {ExpiresAt: now.Add(time.Minute)},
 		},
-		refreshGrants: map[string]refreshGrant{
-			"expired-refresh": {ExpiresAt: now.Add(-time.Second)},
-			"fresh-refresh":   {ExpiresAt: now.Add(time.Minute)},
-		},
 	}
 
 	removed := handler.PruneExpiredState()
-	if removed != 3 {
-		t.Fatalf("expected to remove 3 expired entries, removed %d", removed)
+	if removed != 2 {
+		t.Fatalf("expected to remove 2 expired entries, removed %d", removed)
 	}
 
 	if _, ok := handler.authRequests["expired-request"]; ok {
@@ -35,18 +31,12 @@ func TestHandlerPruneExpiredStateRemovesExpiredEntries(t *testing.T) {
 	if _, ok := handler.authCodes["expired-code"]; ok {
 		t.Fatal("expected expired auth code to be removed")
 	}
-	if _, ok := handler.refreshGrants["expired-refresh"]; ok {
-		t.Fatal("expected expired refresh grant to be removed")
-	}
 
 	if _, ok := handler.authRequests["fresh-request"]; !ok {
 		t.Fatal("expected fresh auth request to remain")
 	}
 	if _, ok := handler.authCodes["fresh-code"]; !ok {
 		t.Fatal("expected fresh auth code to remain")
-	}
-	if _, ok := handler.refreshGrants["fresh-refresh"]; !ok {
-		t.Fatal("expected fresh refresh grant to remain")
 	}
 }
 
@@ -57,8 +47,7 @@ func TestHandlerRunCleanupLoopPrunesExpiredState(t *testing.T) {
 		authRequests: map[string]authorizationRequest{
 			"expired-request": {ExpiresAt: now.Add(-time.Second)},
 		},
-		authCodes:     map[string]authorizationCode{},
-		refreshGrants: map[string]refreshGrant{},
+		authCodes: map[string]authorizationCode{},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
