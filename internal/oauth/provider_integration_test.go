@@ -189,10 +189,44 @@ func TestOAuthProviderEndToEnd(t *testing.T) {
 		"refresh_token": {refreshToken},
 	}.Encode()))
 	refreshRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// Simulate a deploy/restart: refresh grants must survive outside Handler memory.
 	restartedHandler := NewHandler(cfg, store, secret, airtableClient)
 	restartedHandler.Token(refreshRecorder, refreshRequest)
 	if refreshRecorder.Code != http.StatusOK {
 		t.Fatalf("expected refresh token exchange to return 200, got %d with body %s", refreshRecorder.Code, refreshRecorder.Body.String())
+	}
+
+	var refreshResponse map[string]any
+	if err := json.Unmarshal(refreshRecorder.Body.Bytes(), &refreshResponse); err != nil {
+		t.Fatalf("json.Unmarshal() refresh response returned error: %v", err)
+	}
+	rotatedRefreshToken := refreshResponse["refresh_token"].(string)
+	if rotatedRefreshToken == "" || rotatedRefreshToken == refreshToken {
+		t.Fatalf("expected refresh exchange to rotate refresh tokens, got %#v", refreshResponse)
+	}
+
+	reuseRecorder := httptest.NewRecorder()
+	reuseRequest := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {clientID},
+		"refresh_token": {refreshToken},
+	}.Encode()))
+	reuseRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	NewHandler(cfg, store, secret, airtableClient).Token(reuseRecorder, reuseRequest)
+	if reuseRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected consumed refresh token reuse to return 400, got %d with body %s", reuseRecorder.Code, reuseRecorder.Body.String())
+	}
+
+	rotatedRefreshRecorder := httptest.NewRecorder()
+	rotatedRefreshRequest := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {clientID},
+		"refresh_token": {rotatedRefreshToken},
+	}.Encode()))
+	rotatedRefreshRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	NewHandler(cfg, store, secret, airtableClient).Token(rotatedRefreshRecorder, rotatedRefreshRequest)
+	if rotatedRefreshRecorder.Code != http.StatusOK {
+		t.Fatalf("expected rotated refresh token exchange to return 200, got %d with body %s", rotatedRefreshRecorder.Code, rotatedRefreshRecorder.Body.String())
 	}
 }
 
