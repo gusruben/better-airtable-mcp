@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"path"
@@ -15,10 +17,27 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/hackclub/better-airtable-mcp/internal/logx"
 )
 
 const defaultAPIBaseURL = "https://api.airtable.com"
+
+// Airtable's documented per-base rate limit is 5 req/s. We run below that to
+// leave headroom for clock skew between client and server, and we use a token
+// bucket (rather than strict spacing) so brief bursts can drain the burst
+// budget while sustained traffic settles to the steady-state rate.
+const (
+	defaultBaseRateLimit = rate.Limit(4)
+	defaultBaseRateBurst = 4
+
+	// 6 attempts is 5 retries. With Airtable's 30s Retry-After hint and the
+	// exponential schedule below, the worst-case total wait per request is
+	// bounded by maxRetryBackoff * (maxRetryAttempts-1).
+	defaultMaxRetryAttempts = 6
+	defaultMaxRetryBackoff  = 90 * time.Second
+)
 
 type Client interface {
 	ListBases(ctx context.Context, accessToken string) ([]Base, error)
@@ -33,19 +52,30 @@ type MutationRecord struct {
 }
 
 type HTTPClient struct {
-	baseURL    string
-	httpClient *http.Client
-	clock      func() time.Time
-	sleep      func(context.Context, time.Duration) error
+	baseURL     string
+	httpClient  *http.Client
+	clock       func() time.Time
+	sleep       func(context.Context, time.Duration) error
+	randomFloat func() float64
 
 	mu             sync.Mutex
-	nextBaseWindow map[string]*rateWindow
 	nextUserWindow map[string]*rateWindow
+	baseLimiters   map[string]*baseLimiterEntry
+
+	baseRateLimit    rate.Limit
+	baseRateBurst    int
+	maxRetryAttempts int
+	maxRetryBackoff  time.Duration
 }
 
 type rateWindow struct {
 	nextAllowedAt time.Time
 	lastSeen      time.Time
+}
+
+type baseLimiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
 }
 
 type Base struct {
@@ -113,12 +143,17 @@ func NewHTTPClient(baseURL string, httpClient *http.Client) *HTTPClient {
 	}
 
 	return &HTTPClient{
-		baseURL:        strings.TrimRight(baseURL, "/"),
-		httpClient:     httpClient,
-		clock:          time.Now,
-		sleep:          sleepContext,
-		nextBaseWindow: make(map[string]*rateWindow),
-		nextUserWindow: make(map[string]*rateWindow),
+		baseURL:          strings.TrimRight(baseURL, "/"),
+		httpClient:       httpClient,
+		clock:            time.Now,
+		sleep:            sleepContext,
+		randomFloat:      rand.Float64,
+		nextUserWindow:   make(map[string]*rateWindow),
+		baseLimiters:     make(map[string]*baseLimiterEntry),
+		baseRateLimit:    defaultBaseRateLimit,
+		baseRateBurst:    defaultBaseRateBurst,
+		maxRetryAttempts: defaultMaxRetryAttempts,
+		maxRetryBackoff:  defaultMaxRetryBackoff,
 	}
 }
 
@@ -263,7 +298,11 @@ func (c *HTTPClient) doJSON(ctx context.Context, accessToken, method, requestPat
 
 	baseID, _ := airtableBaseIDFromPath(requestPath)
 	tableID, _ := airtableTableIDFromPath(requestPath)
-	for attempt := 0; attempt < 2; attempt++ {
+	maxAttempts := c.maxRetryAttempts
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if err := c.waitForRateLimits(ctx, accessToken, requestPath); err != nil {
 			return err
 		}
@@ -306,23 +345,26 @@ func (c *HTTPClient) doJSON(ctx context.Context, accessToken, method, requestPat
 		}
 		duration := c.clock().Sub(startedAt)
 
-		if response.StatusCode == http.StatusTooManyRequests && attempt == 0 {
-			retryDelay := retryAfterDelay(response.Header.Get("Retry-After"))
+		if response.StatusCode == http.StatusTooManyRequests {
 			response.Body.Close()
-			logx.Event(ctx, "airtable_client", "airtable.request.retry",
-				"method", method,
-				"base_id", baseID,
-				"table_id", tableID,
-				"endpoint_kind", airtableEndpointKind(requestPath),
-				"attempt", attempt+1,
-				"status", response.StatusCode,
-				"duration_ms", duration.Milliseconds(),
-				"retry_delay_ms", retryDelay.Milliseconds(),
-			)
-			if err := c.sleep(ctx, retryDelay); err != nil {
-				return err
+			if attempt < maxAttempts-1 {
+				retryDelay := c.computeRateLimitBackoff(response.Header.Get("Retry-After"), attempt)
+				logx.Event(ctx, "airtable_client", "airtable.request.retry",
+					"method", method,
+					"base_id", baseID,
+					"table_id", tableID,
+					"endpoint_kind", airtableEndpointKind(requestPath),
+					"attempt", attempt+1,
+					"status", response.StatusCode,
+					"duration_ms", duration.Milliseconds(),
+					"retry_delay_ms", retryDelay.Milliseconds(),
+				)
+				if err := c.sleep(ctx, retryDelay); err != nil {
+					return err
+				}
+				continue
 			}
-			continue
+			break
 		}
 
 		defer response.Body.Close()
@@ -394,11 +436,36 @@ func (c *HTTPClient) doJSON(ctx context.Context, accessToken, method, requestPat
 		"base_id", baseID,
 		"table_id", tableID,
 		"endpoint_kind", airtableEndpointKind(requestPath),
-		"attempt", 2,
+		"attempt", maxAttempts,
 		"error_kind", "rate_limit",
 		"error_message", "airtable API returned repeated rate limits",
 	)
-	return fmt.Errorf("airtable API %s %s returned repeated rate limits", method, requestPath)
+	return fmt.Errorf("airtable API %s %s returned repeated rate limits after %d attempts", method, requestPath, maxAttempts)
+}
+
+func (c *HTTPClient) computeRateLimitBackoff(header string, attempt int) time.Duration {
+	delay := retryAfterDelay(header)
+
+	if attempt > 0 {
+		multiplier := math.Pow(1.5, float64(attempt))
+		scaled := time.Duration(float64(delay) * multiplier)
+		if scaled > delay {
+			delay = scaled
+		}
+	}
+
+	if c.randomFloat != nil && delay > 0 {
+		jitter := time.Duration(c.randomFloat() * 0.3 * float64(delay))
+		delay += jitter
+	}
+
+	if c.maxRetryBackoff > 0 && delay > c.maxRetryBackoff {
+		delay = c.maxRetryBackoff
+	}
+	if delay < 0 {
+		delay = 0
+	}
+	return delay
 }
 
 func (c *HTTPClient) waitForRateLimits(ctx context.Context, accessToken, requestPath string) error {
@@ -422,7 +489,43 @@ func (c *HTTPClient) waitForBaseRateLimit(ctx context.Context, requestPath strin
 		return nil
 	}
 
-	return c.waitForWindow(ctx, c.nextBaseWindow, baseID, 200*time.Millisecond)
+	now := c.clock()
+
+	c.mu.Lock()
+	entry, exists := c.baseLimiters[baseID]
+	if !exists {
+		entry = &baseLimiterEntry{
+			limiter: rate.NewLimiter(c.baseRateLimit, c.baseRateBurst),
+		}
+		c.baseLimiters[baseID] = entry
+	}
+	entry.lastSeen = now
+	c.pruneBaseLimitersLocked(now)
+	limiter := entry.limiter
+	c.mu.Unlock()
+
+	reservation := limiter.ReserveN(now, 1)
+	if !reservation.OK() {
+		return fmt.Errorf("airtable rate limiter for base %s rejected reservation", baseID)
+	}
+	delay := reservation.DelayFrom(now)
+	if delay <= 0 {
+		return nil
+	}
+	if err := c.sleep(ctx, delay); err != nil {
+		reservation.CancelAt(c.clock())
+		return err
+	}
+	return nil
+}
+
+func (c *HTTPClient) pruneBaseLimitersLocked(now time.Time) {
+	const ttl = 10 * time.Minute
+	for key, entry := range c.baseLimiters {
+		if now.Sub(entry.lastSeen) > ttl {
+			delete(c.baseLimiters, key)
+		}
+	}
 }
 
 func (c *HTTPClient) waitForWindow(ctx context.Context, windows map[string]*rateWindow, key string, interval time.Duration) error {
@@ -454,11 +557,6 @@ func (c *HTTPClient) waitForWindow(ctx context.Context, windows map[string]*rate
 
 func (c *HTTPClient) pruneRateWindowsLocked(now time.Time) {
 	const ttl = 10 * time.Minute
-	for key, window := range c.nextBaseWindow {
-		if now.Sub(window.lastSeen) > ttl {
-			delete(c.nextBaseWindow, key)
-		}
-	}
 	for key, window := range c.nextUserWindow {
 		if now.Sub(window.lastSeen) > ttl {
 			delete(c.nextUserWindow, key)
