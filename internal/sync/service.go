@@ -567,12 +567,9 @@ func buildSyncPlans(tables []Table) ([]syncTablePlan, error) {
 		}
 
 		sanitizedFieldNames := duckdb.SanitizeFieldIdentifiers(fieldNames)
-		fieldNameMap := make(map[string]string, len(sanitizedFieldNames))
-		for index, sanitized := range sanitizedFieldNames {
-			fieldNameMap[fieldNames[index]] = sanitized.Sanitized
-		}
 
 		fields := make([]duckdb.FieldSnapshot, 0, len(fieldNames))
+		sanitizedIndex := 0
 		for _, field := range table.Fields {
 			mapping, ok := duckdb.AirtableTypeToDuckDBType(field.Type)
 			if !ok || mapping.Omitted {
@@ -581,10 +578,11 @@ func buildSyncPlans(tables []Table) ([]syncTablePlan, error) {
 			fields = append(fields, duckdb.FieldSnapshot{
 				AirtableFieldID:   field.ID,
 				OriginalFieldName: field.Name,
-				DuckDBColumnName:  fieldNameMap[field.Name],
+				DuckDBColumnName:  sanitizedFieldNames[sanitizedIndex].Sanitized,
 				AirtableFieldType: field.Type,
 				DuckDBType:        mapping.DuckDBType,
 			})
+			sanitizedIndex++
 		}
 
 		plans = append(plans, syncTablePlan{
