@@ -1,79 +1,136 @@
-import { formatFieldValue } from "../formatters";
-import type { OperationPreview, OperationPreviewRecord } from "../types";
+import {
+  CopyId,
+  FieldIcon,
+  OperationBadge,
+  RecordNameLink,
+  TableLink,
+  fieldTypeLabel,
+  formatFieldValue,
+  orderFieldKeys,
+  primaryFieldDisplay,
+  recordCountLabel,
+  tableUrl,
+} from "../formatters";
+import type {
+  FieldMeta,
+  LinkedRecordRef,
+  OperationPreview,
+  OperationPreviewRecord,
+} from "../types";
 
 interface DiffViewProps {
   operation: OperationPreview;
+  baseId?: string;
+  linked?: Record<string, LinkedRecordRef>;
 }
 
-function DiffRow({ record }: { record: OperationPreviewRecord }) {
+function DiffRecord({
+  record,
+  fields,
+  baseId,
+  tableId,
+  linked,
+}: {
+  record: OperationPreviewRecord;
+  fields?: FieldMeta[];
+  baseId?: string;
+  tableId?: string;
+  linked?: Record<string, LinkedRecordRef>;
+}) {
   const currentFields = record.current_fields ?? {};
   const nextFields = record.fields ?? {};
+  const ctx = { baseId, linked };
 
-  // Only show fields that are part of the mutation request
-  const changedFieldNames = Object.keys(nextFields).sort();
+  const requestedKeys = Object.keys(nextFields);
+  const changedKeys = requestedKeys.filter(
+    (key) => JSON.stringify(currentFields[key]) !== JSON.stringify(nextFields[key]),
+  );
+  const changed = orderFieldKeys(changedKeys, fields, (key) => nextFields[key]);
 
-  // Unchanged fields: in current snapshot but not in the mutation request
-  const unchangedFieldNames = Object.keys(currentFields)
-    .filter((name) => !(name in nextFields))
-    .sort();
-
-  const truncatedNames = unchangedFieldNames.slice(0, 12);
+  const unchangedNames = [
+    ...requestedKeys.filter((key) => !changedKeys.includes(key)),
+    ...Object.keys(currentFields).filter((key) => !(key in nextFields)),
+  ].sort();
   const tooltipText =
-    truncatedNames.join(", ") +
-    (unchangedFieldNames.length > 12
-      ? `, and ${unchangedFieldNames.length - 12} more`
-      : "");
+    unchangedNames.slice(0, 12).join(", ") +
+    (unchangedNames.length > 12 ? `, and ${unchangedNames.length - 12} more` : "");
+
+  const primary = primaryFieldDisplay(record, fields);
 
   return (
     <div className="record-card">
-      <div className="record-title">{record.id ?? "Unknown record"}</div>
-      <table>
-        <thead>
-          <tr>
-            <th>Field</th>
-            <th>Current</th>
-            <th>Requested</th>
-          </tr>
-        </thead>
-        <tbody>
-          {changedFieldNames.map((fieldName) => (
-            <tr key={fieldName} className="field-changed">
-              <th>{fieldName}</th>
-              <td>{formatFieldValue(currentFields[fieldName])}</td>
-              <td>{formatFieldValue(nextFields[fieldName])}</td>
-            </tr>
-          ))}
-          {unchangedFieldNames.length > 0 && (
-            <tr className="field-unchanged-summary">
-              <td colSpan={3}>
-                <span className="unchanged-hint" title={tooltipText}>
-                  {unchangedFieldNames.length} other field
-                  {unchangedFieldNames.length === 1 ? "" : "s"}
-                </span>{" "}
-                will remain unchanged
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      <div className="record-title">
+        <RecordNameLink baseId={baseId} tableId={tableId} recordId={record.id} primary={primary} />
+        {record.id ? <CopyId id={record.id} /> : null}
+      </div>
+      {changed.length > 0 ? (
+        <div className="table-shell">
+          <table className="diff-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Was</th>
+                <th>Now</th>
+              </tr>
+            </thead>
+            <tbody>
+              {changed.map(({ key, label, type, atType }) => {
+                const before = currentFields[key];
+                const after = nextFields[key];
+                return (
+                  <tr key={key}>
+                    <th data-tooltip={fieldTypeLabel(atType, type)}>
+                      <FieldIcon type={type} />
+                      {label}
+                    </th>
+                    <td className="diff-was">{formatFieldValue(before, ctx)}</td>
+                    <td className="diff-now">{formatFieldValue(after, ctx)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="unchanged-note">No field values change for this record.</p>
+      )}
+      {unchangedNames.length > 0 && (
+        <p className="unchanged-note">
+          <span className="unchanged-hint" data-tooltip={tooltipText}>
+            {unchangedNames.length} other field{unchangedNames.length === 1 ? "" : "s"}
+          </span>{" "}
+          unchanged
+        </p>
+      )}
     </div>
   );
 }
 
-export function DiffView({ operation }: DiffViewProps) {
+export function DiffView({ operation, baseId, linked }: DiffViewProps) {
+  const tableName = operation.original_table_name ?? operation.table;
+  const href = tableUrl(baseId, operation.table_id);
+
   return (
     <section className="preview-card">
       <div className="preview-header">
-        <div>
-          <h2>Update in {operation.original_table_name ?? operation.table}</h2>
-          <p className="preview-subtitle">
-            Only modified fields are shown. Other fields remain untouched.
-          </p>
+        <div className="preview-title">
+          <OperationBadge kind="update" />
+          <h2>
+            Update {recordCountLabel(operation.records.length)} in{" "}
+            <TableLink href={href} name={tableName} />
+          </h2>
         </div>
       </div>
       <div className="record-grid">
         {operation.records.map((record, index) => (
-          <DiffRow key={`${record.id ?? "record"}-${index}`} record={record} />
+          <DiffRecord
+            key={`${record.id ?? "record"}-${index}`}
+            record={record}
+            fields={operation.fields}
+            baseId={baseId}
+            tableId={operation.table_id}
+            linked={linked}
+          />
         ))}
       </div>
     </section>

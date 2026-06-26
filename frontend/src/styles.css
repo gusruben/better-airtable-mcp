@@ -1,23 +1,72 @@
+/* Better Airtable MCP — approval + debug UI.
+   Design language: Airtable product CSS, extracted from the live app bundle
+   (static.airtable.com/css/compiled/v2/all.*.css) via browser-traffic capture —
+   see claude-workspace/airtable-ref/tokens.md. Real Airtable token system:
+   semantic --c-* names backed by Airtable's actual palette + Inter typeface. */
+
 :root {
-  --bg: #f3ecdf;
-  --paper: rgba(255, 252, 245, 0.92);
-  --line: #d8ccb8;
-  --text: #1f1a15;
-  --muted: #6e6457;
-  --approve: #0b7a52;
-  --reject: #b44634;
-  --accent: #e1d1b4;
-  --shadow: rgba(52, 42, 26, 0.12);
-  color: var(--text);
-  font-family:
-    Iowan Old Style,
-    Palatino Linotype,
-    Book Antiqua,
-    Georgia,
-    serif;
-  background:
-    radial-gradient(circle at top left, rgba(230, 210, 177, 0.8), transparent 28rem),
-    linear-gradient(180deg, #f6f0e7 0%, #efe5d7 100%);
+  /* Neutrals (Airtable cool-tinted grays) */
+  --c-surface: #ffffff;
+  --c-bg: #f6f8fc;            /* gray50 — page background */
+  --c-fill: #f2f4f8;          /* gray75 — inset control fill */
+  --c-fill-hover: #e5e9f0;    /* gray100 */
+  --c-border: rgba(0, 0, 0, 0.1);     /* opacity-darken2 */
+  --c-border-subtle: rgba(0, 0, 0, 0.05);
+  --c-border-strong: #949494; /* gray350 */
+  --c-text: #1d1f25;          /* gray800 — foreground default */
+  --c-muted: #616670;         /* gray500 */
+  --c-faint: #979aa0;         /* gray400 */
+
+  /* Grid view (real cell tokens) */
+  --c-grid-line: #dde1e6;          /* --cell-borderColor hsl(202,10%,88%) */
+  --c-grid-header: #f4f4f4;        /* --cell-background-header */
+  --c-grid-header-border: #d1d1d1; /* --cell-borderColor-header hsl(0,0%,82%) */
+  --c-grid-hover: #f5f5f5;         /* neutral full-row hover (--rdg-row-hover-background hsl(0,0%,96%));
+                                      the blue-tinted #edf1f3 is only the row-number gutter, not the row */
+  --c-link: #166ee1;               /* --colors-hyperlink-primary */
+
+  /* Accent + status (real Airtable values) */
+  --c-blue: #166ee1;          /* palette blue */
+  --c-blue-hover: #0d52ac;    /* blueDark1 */
+  --c-blue-text: #0d52ac;
+  --c-blue-tint: #f1f5ff;     /* blueLight3 */
+  --c-blue-tint2: #d1e2ff;    /* blueLight2 */
+  --c-red: #dc043b;
+  --c-red-hover: #b10f41;     /* redDark1 */
+  --c-red-text: #b10f41;
+  --c-red-tint: #fff2fa;      /* redLight3 */
+  --c-green-text: #006400;    /* greenDark1 */
+  --c-green-tint: #e6fce8;    /* greenLight3 */
+  --c-amber-text: #af6002;    /* yellowDark1 */
+  --c-amber-tint: #fff6dd;    /* yellowLight3 */
+
+  /* Type — Airtable ships Inter (Inter Display) */
+  --font-sans: "Inter", "Inter Display", -apple-system, BlinkMacSystemFont,
+    "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* 4pt spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 40px;
+  --space-8: 64px;
+
+  --radius: 3px;             /* default control */
+  --radius-lg: 6px;          /* surfaces / cards */
+  --radius-pill: 9999px;
+  --shadow-raised: 0 0 1px rgba(0, 0, 0, 0.32), 0 0 2px rgba(0, 0, 0, 0.08);
+  --shadow-pop: 0 0 1px rgba(0, 0, 0, 0.24), 0 1px 3px rgba(0, 0, 0, 0.16);
+  --focus-ring: 0 0 0 2px var(--c-blue);
+
+  color: var(--c-text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  font-feature-settings: "cv05" 1; /* Inter: lowercase-l with tail */
 }
 
 * {
@@ -27,7 +76,10 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: transparent;
+  background: var(--c-bg);
+  color: var(--c-text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -35,287 +87,795 @@ input,
 textarea,
 select {
   font: inherit;
+  color: inherit;
 }
+
+a {
+  color: var(--c-blue);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius);
+}
+
+/* ---------- Layout ---------- */
 
 .page-shell {
-  width: min(1120px, calc(100vw - 32px));
+  width: min(1040px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: 28px 0 48px;
-}
-
-.hero-grid {
+  padding: var(--space-7) 0 var(--space-8);
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
-  gap: 18px;
-  margin-bottom: 22px;
+  gap: var(--space-4);
+  /* Children must be allowed to shrink so a wide table scrolls instead of
+     overflowing the page (which pushed the centered column to the right). */
+  min-width: 0;
 }
 
+/* Cards = Airtable raised surfaces: white, 1px translucent border, soft elevation. */
 .hero-card,
 .detail-card,
 .preview-card {
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 22px;
-  padding: 22px;
-  box-shadow: 0 22px 60px var(--shadow);
-  backdrop-filter: blur(14px);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-raised);
+  min-width: 0;
 }
 
 .hero-card h1 {
-  margin: 0 0 12px;
-  font-size: clamp(2.4rem, 4vw, 4rem);
-  line-height: 0.98;
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--c-text);
+  letter-spacing: -0.01em;
 }
 
-.pill-row {
+/* Inline metadata row (replaces the old sidebar) */
+.meta-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 18px;
+  gap: var(--space-1) var(--space-3);
+  margin-top: var(--space-2);
+  color: var(--c-muted);
+  font-size: 13px;
 }
-
-.pill {
+.meta-row .meta-item {
   display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  background: var(--accent);
-  padding: 7px 12px;
-  font-size: 0.94rem;
+  gap: 6px;
+}
+.meta-row .meta-item .meta-key {
+  color: var(--c-faint);
+}
+.meta-row .meta-sep {
+  color: var(--c-faint);
+}
+.meta-row .is-mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
-.meta-text,
-.notice,
-.preview-subtitle,
-.detail-list dt {
-  color: var(--muted);
+/* ---------- Status banner ---------- */
+
+.status-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-fill);
+  color: var(--c-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.status-banner .status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.status-banner.is-info {
+  background: var(--c-blue-tint);
+  border-color: transparent;
+  color: var(--c-blue-text);
+}
+.status-banner.is-success {
+  background: var(--c-green-tint);
+  border-color: transparent;
+  color: var(--c-green-text);
+}
+.status-banner.is-warning {
+  background: var(--c-amber-tint);
+  border-color: transparent;
+  color: var(--c-amber-text);
+}
+.status-banner.is-danger {
+  background: var(--c-red-tint);
+  border-color: transparent;
+  color: var(--c-red-text);
+}
+.status-banner.is-neutral {
+  background: var(--c-fill);
+  border-color: var(--c-border);
+  color: var(--c-muted);
+}
+
+/* ---------- Notices ---------- */
+
+.meta-text {
+  margin: 0;
+  color: var(--c-muted);
+  font-size: 13px;
 }
 
 .notice-stack {
   display: grid;
-  gap: 8px;
-  margin-top: 18px;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
 }
 
-.detail-card h2,
-.preview-card h2 {
-  margin: 0 0 12px;
-  font-size: 1.2rem;
-}
-
-.detail-list {
-  display: grid;
-  gap: 14px;
+.notice {
   margin: 0;
+  color: var(--c-muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
-.detail-list div {
-  display: grid;
-  gap: 4px;
-}
-
-.detail-list dt {
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.detail-list dd {
-  margin: 0;
-  font-size: 1rem;
-  word-break: break-word;
-}
+/* ---------- Buttons (Airtable) ---------- */
 
 .action-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 22px;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--c-border);
 }
 
-.action-button {
-  border: 0;
-  border-radius: 999px;
-  color: #fff;
+.action-button,
+.btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  padding: 6px var(--space-3);
   cursor: pointer;
-  padding: 12px 18px;
+  transition: background-color 100ms ease, border-color 100ms ease, box-shadow 100ms ease;
 }
 
-.action-button:disabled {
+.action-button.approve,
+.btn-primary {
+  background: var(--c-blue);
+  color: #fff;
+}
+.action-button.approve:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
+  background: var(--c-blue-hover);
+}
+
+.action-button.reject,
+.action-button.secondary,
+.btn-default {
+  background: var(--c-surface);
+  color: var(--c-text);
+  border-color: var(--c-border);
+}
+.action-button.reject:hover:not(:disabled),
+.action-button.secondary:hover:not(:disabled),
+.btn-default:hover:not(:disabled) {
+  background: var(--c-fill);
+}
+
+.btn-danger {
+  background: var(--c-red);
+  color: #fff;
+}
+
+.action-button:disabled,
+.btn:disabled {
   cursor: default;
-  opacity: 0.45;
+  opacity: 0.4;
 }
 
-.action-button.approve {
-  background: var(--approve);
-}
-
-.action-button.reject {
-  background: var(--reject);
-}
+/* ---------- Previews ---------- */
 
 .preview-stack {
   display: grid;
-  gap: 18px;
+  gap: var(--space-4);
 }
 
 .preview-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 14px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+/* Heading + its leading operation badge sit on one row, vertically centered. */
+.preview-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* Tinted square that types each card at a glance — create / update / delete,
+   using Airtable's own light status tints. The one deliberate spot of color. */
+.op-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius);
+}
+.op-badge.is-create {
+  background: var(--c-green-tint);
+  color: var(--c-green-text);
+}
+.op-badge.is-update {
+  background: var(--c-blue-tint);
+  color: var(--c-blue-text);
+}
+.op-badge.is-delete {
+  background: var(--c-red-tint);
+  color: var(--c-red-text);
+}
+
+.detail-card h2,
+.preview-card h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+.preview-subtitle {
+  margin: var(--space-1) 0 0;
+  color: var(--c-muted);
+  font-size: 12px;
 }
 
 .table-shell {
   overflow-x: auto;
+  border: 1px solid var(--c-grid-line);
+  border-radius: var(--radius);
 }
 
 .record-grid {
   display: grid;
-  gap: 14px;
+  gap: var(--space-5);
 }
 
+/* Per-record block with a clear header bar so record boundaries are obvious. */
 .record-card {
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 16px;
+  border: 1px solid var(--c-grid-line);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 
 .record-title {
-  margin-bottom: 10px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--c-grid-header);
+  border-bottom: 1px solid var(--c-grid-header-border);
+  font-size: 12px;
+  color: var(--c-muted);
+}
+/* The record's primary-field value names the record and links to it (Airtable
+   expanded-record style); open-in-new-tab icon shows on hover. */
+.record-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
   font-weight: 600;
+  color: var(--c-text);
+  text-decoration: none;
+}
+.record-name.is-untitled {
+  font-weight: 500;
+  font-style: italic;
+  color: var(--c-muted);
+}
+.record-name-link:hover {
+  text-decoration: underline;
+}
+.record-name-link .ext-icon {
+  opacity: 0;
+  transition: opacity 100ms ease;
+  color: var(--c-faint);
+}
+.record-name-link:hover .ext-icon {
+  opacity: 0.7;
 }
 
+/* Record id: a copy-to-clipboard control (not a link). */
+.copy-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 1px 4px;
+  margin: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--c-faint);
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+.copy-id:hover {
+  color: var(--c-muted);
+}
+.copy-id.is-copied {
+  color: var(--c-green-text);
+}
+/* Trailing icon, revealed on hover — matches the record-name link's ext-icon. */
+.copy-id svg {
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+.copy-id:hover svg {
+  opacity: 0.7;
+}
+.copy-id.is-copied svg {
+  opacity: 1;
+}
+/* When a record block wraps a table, the table's own outer border is redundant. */
+.record-card .table-shell {
+  border: 0;
+  border-radius: 0;
+}
+
+/* ---------- Tables (Airtable grid) ---------- */
+
 table {
-  width: 100%;
+  width: auto;
+  min-width: 100%;
   border-collapse: collapse;
-  font-size: 0.96rem;
+  font-size: 13px;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--c-grid-header);
+  color: var(--c-text);
+  font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--c-grid-header-border);
 }
 
 th,
 td {
-  border-top: 1px solid var(--line);
-  padding: 9px 10px;
+  padding: 6px var(--space-2);
+  min-height: 32px;
   text-align: left;
   vertical-align: top;
+  border-right: 1px solid var(--c-grid-line);
+  border-bottom: 1px solid var(--c-grid-line);
+  /* Columns size to their content but cap at a readable width, then wrap — short
+     fields (number/date/select) stay narrow, long ones (descriptions) get
+     reasonably wide without ballooning. pre-wrap keeps real line breaks. */
+  min-width: 90px;
+  max-width: 30rem;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
-th {
-  font-weight: 600;
+th:last-child,
+td:last-child {
+  border-right: 0;
 }
 
-.field-changed {
-  background: rgba(11, 122, 82, 0.08);
+tbody th {
+  font-weight: 400;
+  color: var(--c-text);
 }
 
-.field-unchanged {
-  opacity: 0.68;
+/* Freeze the primary (first) column on horizontal scroll, like Airtable. */
+thead th:first-child,
+tbody th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--c-surface);
+}
+thead th:first-child {
+  z-index: 2;
+  background: var(--c-grid-header);
 }
 
-.field-unchanged-summary td {
-  color: var(--muted);
-  font-size: 0.9rem;
-  font-style: italic;
-  padding-top: 12px;
+tbody tr:hover td,
+tbody tr:hover th {
+  background: var(--c-grid-hover);
+}
+tbody tr:hover th:first-child {
+  background: var(--c-grid-hover);
+}
+
+td.is-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Clickable cell values (url / email) — Airtable hyperlink style */
+.cell-link {
+  color: var(--c-link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Field-type icon in column / field headers — Airtable renders these at 16px in
+   the subtle-foreground gray (gray500). */
+.field-icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: -4px;
+  margin-right: 6px;
+  color: var(--c-muted);
+}
+
+/* Table name links to the table in Airtable; open-in-new-tab icon on hover. */
+.table-link {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.table-link .ext-icon {
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+.table-link:hover .ext-icon {
+  opacity: 0.7;
+}
+
+/* Subtle persistent underline marks table/base names as links; it strengthens
+   to the text color on hover. */
+.link-text,
+.base-name {
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 0, 0, 0.28);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  transition: text-decoration-color 100ms ease;
+}
+.table-link:hover .link-text,
+.base-link:hover .base-name {
+  text-decoration-color: currentColor;
+}
+
+/* Base name links to the base in Airtable (open-in-new-tab on hover). */
+.base-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: inherit;
+  text-decoration: none;
+}
+.base-name {
+  color: var(--c-text);
+}
+.base-link .ext-icon {
+  opacity: 0;
+  transition: opacity 100ms ease;
+  color: var(--c-faint);
+}
+.base-link:hover .ext-icon {
+  opacity: 0.7;
+}
+
+/* ---------- Diff table ---------- */
+
+/* Old value de-emphasized (no strikethrough — Was/Now columns carry the meaning). */
+.diff-table td.diff-was {
+  color: var(--c-muted);
+}
+
+.unchanged-note {
+  margin: var(--space-2) var(--space-3);
+  color: var(--c-muted);
+  font-size: 12px;
 }
 
 .unchanged-hint {
-  text-decoration: underline dotted var(--muted);
+  text-decoration: underline dotted var(--c-border-strong);
   text-underline-offset: 3px;
   cursor: help;
+  color: var(--c-text);
 }
 
+/* ---------- Field values ---------- */
+
 .field-empty {
-  color: var(--muted);
+  color: var(--c-faint);
   font-style: italic;
 }
 
 .field-stack {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+/* Image attachments preview as small thumbnails, like Airtable grid cells. */
+.at-thumb-link {
+  display: inline-flex;
+  line-height: 0;
+}
+.at-thumb {
+  height: 64px;
+  width: auto;
+  max-width: 180px;
+  object-fit: cover;
+  border-radius: 3px;
+  border: 1px solid var(--c-border);
+  background: var(--c-fill);
+}
+
+/* Airtable choice / multi-select token (.choiceToken: 22px tall, 11px radius pill) */
+.at-token {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-2);
+  height: 22px;
+  border-radius: 11px;
+  background: var(--c-fill-hover);
+  color: var(--c-text);
+  font-size: 13px;
+  line-height: 22px;
+  white-space: nowrap;
+}
+
+/* Airtable linked-record token (.foreignRecord: #deebff, 2px radius, blue text) */
+/* Airtable linked-record token (.foreignRecord): #e9eef9 pill, DARK text,
+   3px radius — not blue. */
+.at-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius);
+  background: #e9eef9;
+  color: var(--c-text);
+  font-size: 13px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+/* When the chip links to the record, a subtle darken signals it's clickable. */
+a.at-link {
+  text-decoration: none;
+}
+a.at-link:hover {
+  background: #dce4f3;
+}
+
+/* Custom tooltip matching Airtable's `.ui-tooltip`: white chip, dark text, 13px,
+   3px radius, a thin ring plus subtle elevation. Portal-rendered (position:fixed)
+   so it escapes the grid's horizontal-scroll clipping. */
+.at-tooltip {
+  position: fixed;
+  z-index: 2147483000;
+  max-width: 300px;
+  padding: 4px 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--c-text);
+  background: var(--c-surface);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.16);
+  pointer-events: none;
+  white-space: normal;
+  overflow-wrap: break-word;
+  animation: at-tooltip-in 80ms ease-out;
+}
+.at-tooltip.is-top {
+  transform: translate(-50%, calc(-100% - 6px));
+}
+.at-tooltip.is-bottom {
+  transform: translate(-50%, 6px);
+}
+@keyframes at-tooltip-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Airtable-style checkbox glyph (inline SVG via currentColor) */
+.at-bool {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.at-bool .at-check {
+  flex: 0 0 auto;
+}
+.at-bool.is-on {
+  color: var(--c-blue);
+}
+.at-bool.is-off {
+  color: var(--c-faint);
 }
 
 .field-pre {
   margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.87rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+  background: var(--c-fill);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
 }
 
 .error-text {
-  color: var(--reject);
+  margin: 0;
+  color: var(--c-red-text);
+  font-size: 13px;
 }
+
+/* ---------- Execution result ---------- */
+
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.result-stat {
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  background: var(--c-bg);
+}
+
+.result-stat .stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--c-text);
+}
+
+/* Non-zero outcome counts pick up the matching semantic color. */
+.result-stat .stat-value.is-created {
+  color: var(--c-green-text);
+}
+.result-stat .stat-value.is-updated {
+  color: var(--c-blue-text);
+}
+.result-stat .stat-value.is-deleted {
+  color: var(--c-red-text);
+}
+
+.result-stat .stat-label {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--c-muted);
+}
+
+/* ---------- Pills (debug) ---------- */
+
+.pill-row,
+.debug-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius);
+  background: var(--c-fill);
+  color: var(--c-muted);
+  font-size: 12px;
+  padding: 3px var(--space-2);
+}
+
+/* ---------- Debug page ---------- */
 
 .debug-hero h1 {
-  font-size: clamp(2rem, 3.4vw, 3.2rem);
-}
-
-.debug-pill-row {
-  margin-bottom: 12px;
+  margin: 0 0 var(--space-2);
+  font-size: 18px;
+  font-weight: 600;
 }
 
 .debug-connect-row {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
-  gap: 18px;
-  margin-top: 22px;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  align-items: stretch;
 }
 
 .debug-session-card {
-  align-self: start;
+  align-self: stretch;
 }
 
 .debug-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .debug-panel {
   display: grid;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .debug-label,
 .debug-subtitle {
-  color: var(--muted);
-  font-size: 0.85rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--c-muted);
+  font-size: 12px;
 }
 
 .debug-subtitle {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
+/* Segmented control */
 .debug-toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 8px;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
 }
 
 .debug-toggle-group {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 2px;
+  padding: 2px;
+  background: var(--c-fill);
+  border-radius: var(--radius);
 }
 
 .debug-toggle-button {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.7);
-  color: var(--muted);
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--c-muted);
   cursor: pointer;
-  padding: 7px 12px;
+  padding: var(--space-1) var(--space-2);
+  font-size: 13px;
 }
 
 .debug-toggle-button.active {
-  background: var(--accent);
-  color: var(--text);
+  background: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: var(--shadow-raised);
 }
 
 .debug-toggle-button:disabled {
@@ -323,18 +883,34 @@ th {
   opacity: 0.5;
 }
 
+input[type="text"],
+input[type="search"],
+input:not([type]),
+textarea,
+select {
+  width: 100%;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-surface);
+  color: var(--c-text);
+  padding: 6px var(--space-3);
+  font-size: 13px;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-color: var(--c-blue);
+  box-shadow: var(--focus-ring);
+}
+
 .debug-textarea {
   min-height: 190px;
-  width: 100%;
   resize: vertical;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.9rem;
+  background: var(--c-fill);
+  font-family: var(--font-mono);
+  font-size: 12px;
   line-height: 1.5;
-  padding: 14px 16px;
 }
 
 .token-textarea {
@@ -345,47 +921,46 @@ th {
   min-height: 90px;
   margin: 0;
   overflow-x: auto;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.72);
-  padding: 14px 16px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.88rem;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-fill);
+  padding: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .tool-card {
-  gap: 18px;
+  display: grid;
+  gap: var(--space-4);
 }
 
 .tool-card-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
 .tool-response-panel {
-  margin-top: 18px;
+  margin-top: var(--space-4);
 }
 
 .debug-response-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--space-4);
 }
 
-@media (max-width: 900px) {
-  .page-shell {
-    width: min(100vw - 20px, 1120px);
-    padding-top: 16px;
-  }
+/* ---------- Responsive ---------- */
 
-  .hero-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 760px) {
+  .page-shell {
+    width: min(100vw - 24px, 760px);
+    padding-top: var(--space-4);
   }
 
   .debug-connect-row,
@@ -393,11 +968,22 @@ th {
   .debug-response-grid,
   .tool-card-header {
     grid-template-columns: 1fr;
-    display: grid;
   }
 
   .debug-toggle-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .action-button,
+  .btn {
+    min-height: 36px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
   }
 }

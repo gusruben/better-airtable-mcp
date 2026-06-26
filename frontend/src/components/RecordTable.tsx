@@ -1,48 +1,64 @@
-import { formatFieldValue } from "../formatters";
-import type { OperationPreview } from "../types";
+import {
+  FieldIcon,
+  OperationBadge,
+  TableLink,
+  buildColumns,
+  fieldTypeLabel,
+  formatFieldValue,
+  recordCountLabel,
+  tableUrl,
+} from "../formatters";
+import type { LinkedRecordRef, OperationPreview } from "../types";
 
 interface RecordTableProps {
   operation: OperationPreview;
+  baseId?: string;
+  linked?: Record<string, LinkedRecordRef>;
 }
 
-function collectColumns(operation: OperationPreview): string[] {
-  return Array.from(
-    new Set(
-      operation.records.flatMap((record) => Object.keys(record.fields ?? {})),
-    ),
-  ).sort();
-}
-
-export function RecordTable({ operation }: RecordTableProps) {
-  const columns = collectColumns(operation);
+export function RecordTable({ operation, baseId, linked }: RecordTableProps) {
+  const columns = buildColumns(operation.fields, operation.records);
+  const tableName = operation.original_table_name ?? operation.table;
+  const href = tableUrl(baseId, operation.table_id);
+  const ctx = { baseId, linked };
 
   return (
     <section className="preview-card">
       <div className="preview-header">
-        <div>
-          <h2>Create in {operation.original_table_name ?? operation.table}</h2>
-          <p className="preview-subtitle">
-            {operation.records.length} record(s) will be created.
-          </p>
+        <div className="preview-title">
+          <OperationBadge kind="create" />
+          <h2>
+            Create {recordCountLabel(operation.records.length)} in{" "}
+            <TableLink href={href} name={tableName} />
+          </h2>
         </div>
       </div>
       <div className="table-shell">
         <table>
           <thead>
             <tr>
-              <th>Record</th>
-              {columns.map((column) => (
-                <th key={column}>{column}</th>
+              {columns.map((column, i) => (
+                <th key={i} data-tooltip={fieldTypeLabel(column.atType, column.type)}>
+                  <FieldIcon type={column.type} />
+                  {column.label}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {operation.records.map((record, index) => (
               <tr key={`${record.id ?? "new"}-${index}`}>
-                <th>New record {index + 1}</th>
-                {columns.map((column) => (
-                  <td key={column}>{formatFieldValue(record.fields?.[column])}</td>
-                ))}
+                {columns.map((column, i) => {
+                  const value = column.get(record.fields);
+                  const content = formatFieldValue(value, ctx);
+                  return i === 0 ? (
+                    <th key={i}>{content}</th>
+                  ) : (
+                    <td key={i} className={typeof value === "number" ? "is-num" : undefined}>
+                      {content}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>

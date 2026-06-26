@@ -14,10 +14,23 @@ export interface OperationPreviewRecord {
   current_fields?: Record<string, unknown>;
 }
 
+export interface FieldMeta {
+  name: string;
+  key?: string;
+  type: string;
+}
+
+export interface LinkedRecordRef {
+  name?: string;
+  table_id?: string;
+}
+
 export interface OperationPreview {
   type: "create_records" | "update_records" | "delete_records";
   table: string;
   original_table_name?: string;
+  table_id?: string;
+  fields?: FieldMeta[];
   records: OperationPreviewRecord[];
 }
 
@@ -44,6 +57,7 @@ export interface OperationView {
   resolved_at?: string;
   last_synced_at: string;
   operations: OperationPreview[];
+  linked_records?: Record<string, LinkedRecordRef>;
   result?: ExecutionResult;
   error?: string;
   approval_url_is_credential: boolean;

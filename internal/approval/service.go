@@ -89,20 +89,40 @@ type OperationView struct {
 	ExpiresAt               time.Time          `json:"expires_at"`
 	ResolvedAt              *time.Time         `json:"resolved_at,omitempty"`
 	LastSyncedAt            time.Time          `json:"last_synced_at"`
-	Operations              []OperationPreview `json:"operations"`
-	Result                  *ExecutionResult   `json:"result,omitempty"`
-	Error                   string             `json:"error,omitempty"`
-	ApprovalURLIsCredential bool               `json:"approval_url_is_credential"`
-	PreviewIsSnapshot       bool               `json:"preview_is_snapshot"`
-	CanApprove              bool               `json:"can_approve"`
-	CanReject               bool               `json:"can_reject"`
+	Operations              []OperationPreview         `json:"operations"`
+	LinkedRecords           map[string]LinkedRecordRef `json:"linked_records,omitempty"`
+	Result                  *ExecutionResult           `json:"result,omitempty"`
+	Error                   string                     `json:"error,omitempty"`
+	ApprovalURLIsCredential bool                       `json:"approval_url_is_credential"`
+	PreviewIsSnapshot       bool                       `json:"preview_is_snapshot"`
+	CanApprove              bool                       `json:"can_approve"`
+	CanReject               bool                       `json:"can_reject"`
+}
+
+// LinkedRecordRef resolves a linked record id to its primary-field value and the
+// table it lives in, so the UI can show the record's name and link to it instead
+// of a bare recXXXXXXXXXXXXXX id. Resolved from the base's synced cache.
+type LinkedRecordRef struct {
+	Name    string `json:"name,omitempty"`
+	TableID string `json:"table_id,omitempty"`
 }
 
 type OperationPreview struct {
 	Type              string                   `json:"type"`
 	Table             string                   `json:"table"`
 	OriginalTableName string                   `json:"original_table_name"`
+	TableID           string                   `json:"table_id,omitempty"`
+	Fields            []FieldPreview           `json:"fields,omitempty"`
 	Records           []OperationPreviewRecord `json:"records"`
+}
+
+// FieldPreview describes a table field in Airtable's own order (Fields[0] is the
+// primary field), so the approval UI can show type icons, the primary column, and
+// correct ordering without guessing from values.
+type FieldPreview struct {
+	Name string `json:"name"`          // Airtable field name
+	Key  string `json:"key,omitempty"` // DuckDB column name (values may be keyed by this)
+	Type string `json:"type"`          // Airtable field type, e.g. "singleLineText"
 }
 
 type OperationPreviewRecord struct {
@@ -125,9 +145,10 @@ type pendingPayload struct {
 	MCPSessionID  string                    `json:"mcp_session_id,omitempty"`
 	MCPClientID   string                    `json:"mcp_client_id,omitempty"`
 	MCPClientName string                    `json:"mcp_client_name,omitempty"`
-	LastSyncedAt  time.Time                 `json:"last_synced_at"`
-	Summary       string                    `json:"summary"`
-	Operations    []pendingPayloadOperation `json:"operations"`
+	LastSyncedAt  time.Time                  `json:"last_synced_at"`
+	Summary       string                     `json:"summary"`
+	Operations    []pendingPayloadOperation  `json:"operations"`
+	LinkedRecords map[string]LinkedRecordRef `json:"linked_records,omitempty"`
 }
 
 type pendingPayloadOperation struct {
@@ -135,6 +156,7 @@ type pendingPayloadOperation struct {
 	Table             string                 `json:"table"`
 	OriginalTableName string                 `json:"original_table_name"`
 	AirtableTableID   string                 `json:"airtable_table_id"`
+	Fields            []FieldPreview         `json:"fields,omitempty"`
 	Records           []pendingPayloadRecord `json:"records"`
 }
 
@@ -216,15 +238,25 @@ func (s *Service) PrepareMutation(ctx context.Context, userID string, request Mu
 	}
 	syncStatus, _ := s.syncManager.BaseStatus(base.ID)
 
+	// schema.LastSyncedAt is read from _sync_info, which is zero while a fresh
+	// sync run is in progress (only sync_started_at is set yet) even though a
+	// completed snapshot is readable. Fall back to the manager's persisted
+	// last-synced time so the preview shows a real timestamp.
+	lastSyncedAt := schema.LastSyncedAt
+	if lastSyncedAt.IsZero() && syncStatus.LastSyncedAt != nil {
+		lastSyncedAt = *syncStatus.LastSyncedAt
+	}
+
 	payload := pendingPayload{
 		BaseID:        schema.BaseID,
 		BaseName:      schema.BaseName,
 		MCPSessionID:  strings.TrimSpace(request.SessionID),
 		MCPClientID:   strings.TrimSpace(request.ClientID),
 		MCPClientName: strings.TrimSpace(request.ClientName),
-		LastSyncedAt:  schema.LastSyncedAt.UTC(),
+		LastSyncedAt:  lastSyncedAt.UTC(),
 	}
 	currentValues := currentValuesSnapshot{}
+	linkedRecordIDs := map[string]struct{}{}
 
 	for _, operation := range request.Operations {
 		table, tableNames, ok := resolveTableSchema(schema.Tables, operation.Table)
@@ -239,6 +271,7 @@ func (s *Service) PrepareMutation(ctx context.Context, userID string, request Mu
 			Table:             table.DuckDBTableName,
 			OriginalTableName: table.OriginalName,
 			AirtableTableID:   table.AirtableTableID,
+			Fields:            buildFieldPreviews(table.Fields),
 			Records:           make([]pendingPayloadRecord, 0, len(operation.Records)),
 		}
 
@@ -282,6 +315,7 @@ func (s *Service) PrepareMutation(ctx context.Context, userID string, request Mu
 			}
 			for recordID, row := range currentRows {
 				currentValues[table.DuckDBTableName][recordID] = row
+				collectLinkedRecordIDs(row, linkedRecordIDs)
 			}
 		}
 
@@ -306,12 +340,14 @@ func (s *Service) PrepareMutation(ctx context.Context, userID string, request Mu
 				resolvedRecord.AirtableFields[field.OriginalName] = value
 			}
 
+			collectLinkedRecordIDs(resolvedRecord.Fields, linkedRecordIDs)
 			resolved.Records = append(resolved.Records, resolvedRecord)
 		}
 
 		payload.Operations = append(payload.Operations, resolved)
 	}
 
+	payload.LinkedRecords = s.resolveLinkedRecords(ctx, base.ID, schema.Tables, linkedRecordIDs)
 	payload.Summary = summarizeOperations(payload.Operations)
 	payloadCiphertext, err := s.encryptJSON(payload)
 	if err != nil {
@@ -398,6 +434,7 @@ func (s *Service) GetOperation(ctx context.Context, operationID string) (Operati
 		ExpiresAt:               operation.ExpiresAt.UTC(),
 		ResolvedAt:              operation.ResolvedAt,
 		LastSyncedAt:            payload.LastSyncedAt.UTC(),
+		LinkedRecords:           payload.LinkedRecords,
 		ApprovalURLIsCredential: true,
 		PreviewIsSnapshot:       true,
 		CanApprove:              operation.Status == "pending_approval",
@@ -420,6 +457,8 @@ func (s *Service) GetOperation(ctx context.Context, operationID string) (Operati
 			Type:              payloadOperation.Type,
 			Table:             payloadOperation.Table,
 			OriginalTableName: payloadOperation.OriginalTableName,
+			TableID:           payloadOperation.AirtableTableID,
+			Fields:            payloadOperation.Fields,
 			Records:           make([]OperationPreviewRecord, 0, len(payloadOperation.Records)),
 		}
 		for _, record := range payloadOperation.Records {
@@ -738,20 +777,151 @@ func decryptJSON[T any](cipher *cryptoutil.Cipher, ciphertext []byte) (T, error)
 	return value, nil
 }
 
+// buildFieldPreviews snapshots a table's fields in Airtable order (Fields[0] is
+// the primary field) so the approval view carries type/order without re-fetching.
+func buildFieldPreviews(fields []duckdb.FieldSchema) []FieldPreview {
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make([]FieldPreview, 0, len(fields))
+	for _, field := range fields {
+		out = append(out, FieldPreview{
+			Name: field.OriginalName,
+			Key:  field.DuckDBColumnName,
+			Type: field.AirtableType,
+		})
+	}
+	return out
+}
+
+// isAirtableRecordID reports whether s looks like an Airtable record id
+// (rec + 14 alphanumerics). Linked-record cell values are arrays of these.
+func isAirtableRecordID(s string) bool {
+	if !strings.HasPrefix(s, "rec") || len(s) != 17 {
+		return false
+	}
+	for _, r := range s[3:] {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+// collectLinkedRecordIDs adds every record id found inside array-valued fields
+// (the shape of multipleRecordLinks cells) to the set.
+func collectLinkedRecordIDs(fields map[string]any, into map[string]struct{}) {
+	for _, value := range fields {
+		arr, ok := value.([]any)
+		if !ok {
+			continue
+		}
+		for _, item := range arr {
+			if s, ok := item.(string); ok && isAirtableRecordID(s) {
+				into[s] = struct{}{}
+			}
+		}
+	}
+}
+
+// stringifyPrimary renders a linked record's primary-field value as display text.
+func stringifyPrimary(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	default:
+		encoded, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+		return string(encoded)
+	}
+}
+
+// resolveLinkedRecords looks up each linked record id in the base's synced cache,
+// returning its primary-field value and the table it belongs to. Ids that aren't
+// found in any cached table are simply omitted (the UI falls back to the raw id).
+func (s *Service) resolveLinkedRecords(ctx context.Context, baseID string, tables []duckdb.TableSchema, ids map[string]struct{}) map[string]LinkedRecordRef {
+	if len(ids) == 0 || s.syncer == nil {
+		return nil
+	}
+	remaining := make([]string, 0, len(ids))
+	for id := range ids {
+		remaining = append(remaining, id)
+	}
+
+	resolved := make(map[string]LinkedRecordRef)
+	for _, table := range tables {
+		if len(remaining) == 0 {
+			break
+		}
+		rows, err := s.syncer.ReadTableRowsByIDs(ctx, baseID, table.DuckDBTableName, remaining)
+		if err != nil || len(rows) == 0 {
+			continue
+		}
+		primaryColumn := ""
+		if len(table.Fields) > 0 {
+			primaryColumn = table.Fields[0].DuckDBColumnName
+		}
+		for _, row := range rows {
+			id, _ := row["id"].(string)
+			if id == "" {
+				continue
+			}
+			name := ""
+			if primaryColumn != "" {
+				name = stringifyPrimary(row[primaryColumn])
+			}
+			resolved[id] = LinkedRecordRef{Name: name, TableID: table.AirtableTableID}
+		}
+		next := make([]string, 0, len(remaining))
+		for _, id := range remaining {
+			if _, found := resolved[id]; !found {
+				next = append(next, id)
+			}
+		}
+		remaining = next
+	}
+	if len(resolved) == 0 {
+		return nil
+	}
+	return resolved
+}
+
 func summarizeOperations(operations []pendingPayloadOperation) string {
 	if len(operations) == 0 {
 		return "No operations"
 	}
 	if len(operations) == 1 {
 		operation := operations[0]
-		return fmt.Sprintf("%s %d record(s) in %s", summarizeVerb(operation.Type), len(operation.Records), operation.Table)
+		return fmt.Sprintf("%s %s in %s", summarizeVerb(operation.Type), pluralize(len(operation.Records), "record"), operationTableName(operation))
 	}
 
 	parts := make([]string, 0, len(operations))
 	for _, operation := range operations {
 		parts = append(parts, fmt.Sprintf("%s %d", strings.ToLower(summarizeVerb(operation.Type)), len(operation.Records)))
 	}
-	return capitalizeFirst(strings.Join(parts, ", ")) + fmt.Sprintf(" across %d table(s)", distinctTableCount(operations))
+	return capitalizeFirst(strings.Join(parts, ", ")) + " across " + pluralize(distinctTableCount(operations), "table")
+}
+
+// pluralize renders a count with its noun, adding a trailing "s" for any count
+// other than one ("1 record", "3 records").
+func pluralize(count int, noun string) string {
+	if count == 1 {
+		return fmt.Sprintf("%d %s", count, noun)
+	}
+	return fmt.Sprintf("%d %ss", count, noun)
+}
+
+// operationTableName prefers the table's real Airtable name so the summary
+// matches what the reviewer sees in Airtable, falling back to the resolved key.
+func operationTableName(operation pendingPayloadOperation) string {
+	if operation.OriginalTableName != "" {
+		return operation.OriginalTableName
+	}
+	return operation.Table
 }
 
 func summarizeVerb(operationType string) string {
