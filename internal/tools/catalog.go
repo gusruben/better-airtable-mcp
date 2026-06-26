@@ -11,6 +11,7 @@ func NewCatalog(cfg config.Config, runtime *Runtime) []mcp.Tool {
 		NewListSchemaTool(runtime),
 		NewQueryTool(cfg.QueryDefaultLimit, cfg.QueryMaxLimit, runtime),
 		NewMutateTool(runtime),
+		NewSchemaMutateTool(runtime),
 		NewSyncTool(runtime),
 		NewCheckOperationTool(runtime),
 	}

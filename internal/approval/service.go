@@ -22,6 +22,10 @@ type AirtableWriter interface {
 	CreateRecords(ctx context.Context, accessToken, baseID, tableID string, records []syncer.MutationRecord) ([]syncer.Record, error)
 	UpdateRecords(ctx context.Context, accessToken, baseID, tableID string, records []syncer.MutationRecord) ([]syncer.Record, error)
 	DeleteRecords(ctx context.Context, accessToken, baseID, tableID string, recordIDs []string) ([]string, error)
+	CreateTable(ctx context.Context, accessToken, baseID, name, description string, fields []syncer.FieldDefinition) (syncer.Table, error)
+	CreateField(ctx context.Context, accessToken, baseID, tableID string, field syncer.FieldDefinition) (syncer.Field, error)
+	UpdateTable(ctx context.Context, accessToken, baseID, tableID, name, description string) (syncer.Table, error)
+	UpdateField(ctx context.Context, accessToken, baseID, tableID, fieldID, name, description string) (syncer.Field, error)
 }
 
 type Service struct {
@@ -89,9 +93,12 @@ type OperationView struct {
 	ExpiresAt               time.Time          `json:"expires_at"`
 	ResolvedAt              *time.Time         `json:"resolved_at,omitempty"`
 	LastSyncedAt            time.Time          `json:"last_synced_at"`
+	OperationType           string                     `json:"operation_type,omitempty"`
 	Operations              []OperationPreview         `json:"operations"`
 	LinkedRecords           map[string]LinkedRecordRef `json:"linked_records,omitempty"`
+	SchemaOperations        []SchemaOperationPreview   `json:"schema_operations,omitempty"`
 	Result                  *ExecutionResult           `json:"result,omitempty"`
+	SchemaResult            *SchemaExecutionResult     `json:"schema_result,omitempty"`
 	Error                   string                     `json:"error,omitempty"`
 	ApprovalURLIsCredential bool                       `json:"approval_url_is_credential"`
 	PreviewIsSnapshot       bool                       `json:"preview_is_snapshot"`
@@ -370,7 +377,7 @@ func (s *Service) PrepareMutation(ctx context.Context, userID string, request Mu
 		UserID:                  userID,
 		BaseID:                  payload.BaseID,
 		Status:                  "pending_approval",
-		OperationType:           "record_mutation",
+		OperationType:           operationTypeRecord,
 		PayloadCiphertext:       payloadCiphertext,
 		CurrentValuesCiphertext: currentValuesCiphertext,
 		CreatedAt:               createdAt,
@@ -411,6 +418,10 @@ func (s *Service) GetOperation(ctx context.Context, operationID string) (Operati
 		}
 	}
 
+	if operation.OperationType == operationTypeSchema {
+		return s.getSchemaOperationView(ctx, operation)
+	}
+
 	payload, err := decryptJSON[pendingPayload](s.cipher, operation.PayloadCiphertext)
 	if err != nil {
 		return OperationView{}, err
@@ -430,6 +441,7 @@ func (s *Service) GetOperation(ctx context.Context, operationID string) (Operati
 		MCPClientID:             payload.MCPClientID,
 		MCPClientName:           payload.MCPClientName,
 		Summary:                 payload.Summary,
+		OperationType:           operation.OperationType,
 		CreatedAt:               operation.CreatedAt.UTC(),
 		ExpiresAt:               operation.ExpiresAt.UTC(),
 		ResolvedAt:              operation.ResolvedAt,
@@ -501,6 +513,11 @@ func (s *Service) Approve(ctx context.Context, operationID string) (OperationVie
 		"approval_operation_id_hash", logx.ApprovalOperationIDHash(operationID),
 		"status", operation.Status,
 	)
+
+	if operation.OperationType == operationTypeSchema {
+		return s.approveSchemaMutation(ctx, operation)
+	}
+
 	if err := s.store.UpdatePendingOperationStatus(ctx, operation.ID, "executing", nil, nil, nil); err != nil {
 		return OperationView{}, err
 	}

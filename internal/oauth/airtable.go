@@ -14,7 +14,7 @@ import (
 const (
 	defaultAirtableAuthorizeURL = "https://airtable.com/oauth2/v1/authorize"
 	defaultAirtableTokenURL     = "https://airtable.com/oauth2/v1/token"
-	defaultAirtableScopes       = "data.records:read data.records:write schema.bases:read"
+	defaultAirtableScopes       = "data.records:read data.records:write schema.bases:read schema.bases:write"
 )
 
 type AirtableOAuthClient struct {

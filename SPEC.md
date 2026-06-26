@@ -560,6 +560,63 @@ Poll the status of a sync or mutate operation.
 
 ---
 
+### 3.7 `manage_schema`
+
+Request a schema change (create or rename tables and fields), subject to the same
+human-approval flow as `mutate`. Requires the `schema.bases:write` Airtable scope.
+
+**Supported operations only.** Airtable's meta API can create tables and fields and
+rename/redescribe tables and fields. It **cannot** delete a table or field, and it
+**cannot** change an existing field's type. This tool exposes only what the API supports
+and refuses the rest with guidance rather than faking it (it never quietly renames a
+field to "deprecated" and calls it a deletion).
+
+**Input:**
+```json
+{
+  "base": "string — base ID or base name",
+  "operations": [
+    {
+      "type": "create_table | create_field | update_table | update_field",
+      "table": "existing table name/ID (create_field, update_table, update_field)",
+      "field": "existing field name/ID to rename (update_field)",
+      "name": "new table name (create_table) / new field name (create_field) / rename target (update_*)",
+      "description": "optional table or field description",
+      "field_type": "Airtable field type (create_field)",
+      "options": { "…": "Airtable field-options object (create_field)" },
+      "fields": [
+        { "name": "Name", "type": "singleLineText", "description": "", "options": {} }
+      ]
+    }
+  ]
+}
+```
+
+**Behavior:**
+- Refuses deletion (`delete_*`/`remove`/`drop`) and type-change (a `change_field_type`-style
+  op, or a `field_type` on `update_field`) with a plain explanation of the alternatives
+  (create a new field of the desired type and migrate values; remove the old field by hand).
+- Resolves table/field references to Airtable IDs from the synced schema; rejects
+  unknown tables/fields and name collisions for create operations.
+- Stores a pending operation with `operation_type = "schema_mutation"`; returns the
+  approval URL and 60-minute expiry, exactly like `mutate`.
+- On approval, executes one meta API call per operation, sequentially, using the
+  requesting user's Airtable token. A mid-sequence failure yields `partially_completed`.
+- Schema changes restructure the base, so execution triggers a full base re-sync.
+
+**Output:**
+```json
+{
+  "operation_id": "op_XXXXXXXX",
+  "status": "pending_approval",
+  "approval_url": "https://better-airtable-mcp.hackclub.com/approve/op_XXXXXXXX",
+  "expires_at": "2026-04-01T12:10:00Z",
+  "summary": "Add field Status to Projects"
+}
+```
+
+---
+
 ## 4. Sync System
 
 ### 4.1 Sync Worker Lifecycle
@@ -1184,3 +1241,4 @@ All configuration via environment variables:
 - **View-scoped sync** (sync only records visible in a specific Airtable view)
 - **Streaming large query results** instead of returning all rows at once
 - **Schema mutations** (`create_table`, `add_field`, `update_field`) after the record-mutation flow is solid
+- **Automation management** (list/create/update Airtable automations and their triggers/actions via the meta API) once schema mutations are solid

@@ -343,6 +343,7 @@ a:hover {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
+  line-height: 1.5;
   color: var(--c-text);
 }
 
@@ -609,6 +610,95 @@ td.is-num {
   text-underline-offset: 3px;
   cursor: help;
   color: var(--c-text);
+}
+
+/* ---------- Schema preview ---------- */
+
+/* The concrete thing being created or set (a new table/field name, a rename
+   target) rendered as a boxed token so it reads as an object, clearly distinct
+   from the verb phrase around it in the heading. Existing tables stay plain
+   underlined links; only the new/affected name gets the box. */
+.schema-token {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  /* `middle` centers on the x-height midpoint, which reads slightly low against
+     the heading's taller cap letters; a 1px lift restores the optical center. */
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+.schema-token.is-field .field-icon {
+  margin: 0;
+  color: var(--c-muted);
+}
+
+/* "Primary" marker on the first field of a new table, matching Airtable's badge. */
+.schema-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--c-fill-hover);
+  color: var(--c-muted);
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+
+/* Bordered definition panel for a single field (create_field) or a description
+   change — same framed surface as the record tables so it never looks bare. */
+.schema-card {
+  margin: 0;
+  border: 1px solid var(--c-grid-line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.schema-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+}
+.schema-row + .schema-row {
+  border-top: 1px solid var(--c-grid-line);
+}
+.schema-row dt {
+  margin: 0;
+  color: var(--c-muted);
+  font-size: 12px;
+}
+.schema-row dd {
+  margin: 0;
+  color: var(--c-text);
+}
+.schema-type {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.schema-type .field-icon {
+  margin: 0;
+}
+
+/* Select choices shown as Airtable choice tokens; wraps and aligns whether in a
+   definition row or under a type label in the create-table field list. */
+.schema-choices {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+td .schema-choices {
+  display: flex;
+  margin-top: var(--space-1);
 }
 
 /* ---------- Field values ---------- */

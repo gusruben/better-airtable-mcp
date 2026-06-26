@@ -24,7 +24,7 @@ This repository is being implemented from `SPEC.md`. The current implementation 
 - OAuth provider flow for MCP clients chained to Airtable OAuth
 - Shared per-base DuckDB caching with continuous sync workers
 - Restart-safe sync restoration and startup cleanup of stale DuckDB files
-- MCP tools for `list_bases`, `list_schema`, `query`, `sync`, `mutate`, and `check_operation`
+- MCP tools for `list_bases`, `list_schema`, `query`, `sync`, `mutate`, `manage_schema`, and `check_operation`
 - Human approval flow with a bundled React/Vite approval SPA
 - Go unit and integration tests plus frontend unit tests
 

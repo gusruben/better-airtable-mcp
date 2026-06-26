@@ -164,6 +164,27 @@ export function fieldTypeLabel(atType: string | undefined, fieldType: FieldType)
   return FIELD_TYPE_LABELS[fieldType] ?? "Field";
 }
 
+// Airtable's default select-choice palette (the "Light2" token backgrounds,
+// pulled from the live CSS bundle). When a new select field is created without
+// explicit colors, Airtable auto-assigns them by cycling this sequence, so we
+// mirror that order to preview what the choices will look like.
+const CHOICE_COLORS = [
+  "#d1e2ff", // blue
+  "#c4ecff", // cyan
+  "#c1f5f0", // teal
+  "#cff5d1", // green
+  "#ffeab6", // yellow
+  "#ffe0cc", // orange
+  "#ffd4e0", // red
+  "#fad2fc", // pink
+  "#e0dafd", // purple
+  "#e5e9f0", // gray
+];
+
+export function choiceColor(index: number): string {
+  return CHOICE_COLORS[((index % CHOICE_COLORS.length) + CHOICE_COLORS.length) % CHOICE_COLORS.length];
+}
+
 export interface DisplayColumn {
   label: string;
   type: FieldType;

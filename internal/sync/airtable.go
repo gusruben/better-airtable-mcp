@@ -286,6 +286,95 @@ func (c *HTTPClient) DeleteRecords(ctx context.Context, accessToken, baseID, tab
 	return deleted, nil
 }
 
+// FieldDefinition describes a field to create on a table, either as part of a
+// new table or added to an existing one. Options is the Airtable field-options
+// object (choices for selects, linked table id for links, etc.) and is passed
+// through verbatim; it is omitted for types that take no options.
+type FieldDefinition struct {
+	Name        string         `json:"name"`
+	Type        string         `json:"type"`
+	Description string         `json:"description,omitempty"`
+	Options     map[string]any `json:"options,omitempty"`
+}
+
+// CreateTable creates a new table in a base via the meta API. Airtable requires
+// at least one field, and the first field becomes the table's primary field.
+func (c *HTTPClient) CreateTable(ctx context.Context, accessToken, baseID, name, description string, fields []FieldDefinition) (Table, error) {
+	body := map[string]any{
+		"name":   name,
+		"fields": fields,
+	}
+	if strings.TrimSpace(description) != "" {
+		body["description"] = description
+	}
+
+	var table Table
+	requestPath := path.Join("/v0/meta/bases", baseID, "tables")
+	if err := c.doJSON(ctx, accessToken, http.MethodPost, requestPath, nil, body, &table); err != nil {
+		return Table{}, err
+	}
+	return table, nil
+}
+
+// CreateField adds a field to an existing table via the meta API.
+func (c *HTTPClient) CreateField(ctx context.Context, accessToken, baseID, tableID string, field FieldDefinition) (Field, error) {
+	body := map[string]any{
+		"name": field.Name,
+		"type": field.Type,
+	}
+	if strings.TrimSpace(field.Description) != "" {
+		body["description"] = field.Description
+	}
+	if len(field.Options) > 0 {
+		body["options"] = field.Options
+	}
+
+	var created Field
+	requestPath := path.Join("/v0/meta/bases", baseID, "tables", tableID, "fields")
+	if err := c.doJSON(ctx, accessToken, http.MethodPost, requestPath, nil, body, &created); err != nil {
+		return Field{}, err
+	}
+	return created, nil
+}
+
+// UpdateTable renames a table and/or updates its description. Airtable's meta
+// API only allows changing name and description, not structure.
+func (c *HTTPClient) UpdateTable(ctx context.Context, accessToken, baseID, tableID, name, description string) (Table, error) {
+	body := map[string]any{}
+	if strings.TrimSpace(name) != "" {
+		body["name"] = name
+	}
+	if strings.TrimSpace(description) != "" {
+		body["description"] = description
+	}
+
+	var table Table
+	requestPath := path.Join("/v0/meta/bases", baseID, "tables", tableID)
+	if err := c.doJSON(ctx, accessToken, http.MethodPatch, requestPath, nil, body, &table); err != nil {
+		return Table{}, err
+	}
+	return table, nil
+}
+
+// UpdateField renames a field and/or updates its description. Airtable's meta
+// API only allows changing name and description, never the field's type.
+func (c *HTTPClient) UpdateField(ctx context.Context, accessToken, baseID, tableID, fieldID, name, description string) (Field, error) {
+	body := map[string]any{}
+	if strings.TrimSpace(name) != "" {
+		body["name"] = name
+	}
+	if strings.TrimSpace(description) != "" {
+		body["description"] = description
+	}
+
+	var field Field
+	requestPath := path.Join("/v0/meta/bases", baseID, "tables", tableID, "fields", fieldID)
+	if err := c.doJSON(ctx, accessToken, http.MethodPatch, requestPath, nil, body, &field); err != nil {
+		return Field{}, err
+	}
+	return field, nil
+}
+
 func (c *HTTPClient) doJSON(ctx context.Context, accessToken, method, requestPath string, query url.Values, body any, target any) error {
 	var encodedBody []byte
 	if body != nil {
@@ -594,6 +683,12 @@ func airtableEndpointKind(requestPath string) string {
 	}
 	if requestPath == "/v0/meta/bases" {
 		return "list_bases"
+	}
+	if strings.HasPrefix(requestPath, "/v0/meta/bases/") {
+		if strings.Contains(requestPath, "/fields") {
+			return "field_meta"
+		}
+		return "table_meta"
 	}
 	if _, ok := airtableTableIDFromPath(requestPath); ok {
 		return "records"

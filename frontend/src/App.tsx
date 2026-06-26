@@ -4,6 +4,7 @@ import { DeletePreview } from "./components/DeletePreview";
 import { DiffView } from "./components/DiffView";
 import { McpDebugPage } from "./McpDebugPage";
 import { RecordTable } from "./components/RecordTable";
+import { SchemaPreview } from "./components/SchemaPreview";
 import {
   BaseLink,
   absoluteTime,
@@ -18,6 +19,7 @@ import type {
   LinkedRecordRef,
   OperationPreview,
   OperationView,
+  SchemaExecutionResult,
 } from "./types";
 import "./styles.css";
 
@@ -166,6 +168,37 @@ function ResultPanel({ result }: { result: ExecutionResult }) {
   );
 }
 
+function SchemaResultPanel({ result }: { result: SchemaExecutionResult }) {
+  const stats = [
+    { label: "Tables created", value: result.created_table_ids?.length ?? 0, tone: "created" },
+    { label: "Fields created", value: result.created_field_ids?.length ?? 0, tone: "created" },
+    { label: "Tables updated", value: result.updated_table_ids?.length ?? 0, tone: "updated" },
+    { label: "Fields updated", value: result.updated_field_ids?.length ?? 0, tone: "updated" },
+  ];
+
+  return (
+    <section className="preview-card">
+      <h2>Result</h2>
+      <div className="result-grid">
+        {stats.map((stat) => {
+          const toned = stat.value > 0;
+          return (
+            <div className="result-stat" key={stat.label}>
+              <div className={`stat-value${toned ? ` is-${stat.tone}` : ""}`}>
+                {stat.value.toLocaleString()}
+              </div>
+              <div className="stat-label">{stat.label}</div>
+            </div>
+          );
+        })}
+      </div>
+      {typeof result.failed_operation === "number" ? (
+        <p className="error-text">Operation {result.failed_operation + 1} did not complete.</p>
+      ) : null}
+    </section>
+  );
+}
+
 function OperationSection({
   operation,
   baseId,
@@ -199,7 +232,11 @@ function ApprovalView({
   const isPending = operation.status === "pending_approval";
   const remaining = isPending ? countdownLabel(operation.expires_at, now) : "";
   const canAct = operation.can_approve || operation.can_reject;
-  const hasOperations = operation.operations.length > 0;
+  const isSchema = operation.operation_type === "schema_mutation";
+  const schemaOperations = operation.schema_operations ?? [];
+  const hasOperations = isSchema
+    ? schemaOperations.length > 0
+    : operation.operations.length > 0;
   const syncedAt = new Date(operation.last_synced_at);
   const syncedValid = !Number.isNaN(syncedAt.getTime()) && syncedAt.getFullYear() > 2000;
 
@@ -226,31 +263,33 @@ function ApprovalView({
               {relativeTime(operation.created_at, now)}
             </time>
           </MetaItem>
-          {isPending ? (
-            <MetaItem label="Expires">{`${countdownLabel(
-              operation.expires_at,
-              now,
-            )}`}</MetaItem>
-          ) : null}
         </div>
 
         <div className="notice-stack">
           <p className="notice">
             Anyone with this link can approve or reject the request until it expires.
           </p>
-          <p className="notice">
-            {syncedValid ? (
-              <>
-                This is a snapshot of Airtable data taken{" "}
-                <time dateTime={operation.last_synced_at} data-tooltip={absoluteTime(operation.last_synced_at)}>
-                  {relativeTime(operation.last_synced_at, now)} ({absoluteTime(operation.last_synced_at)})
-                </time>
-                , so live records may have changed since.
-              </>
-            ) : (
-              "This is a snapshot of Airtable data, so live records may have changed since."
-            )}
-          </p>
+          {isSchema ? (
+            <p className="notice">
+              Airtable's API can't delete tables or fields, or change a field's type. Creating or
+              renaming is reversible only by hand in Airtable, so review names carefully before
+              approving.
+            </p>
+          ) : (
+            <p className="notice">
+              {syncedValid ? (
+                <>
+                  This is a snapshot of Airtable data taken{" "}
+                  <time dateTime={operation.last_synced_at} data-tooltip={absoluteTime(operation.last_synced_at)}>
+                    {relativeTime(operation.last_synced_at, now)} ({absoluteTime(operation.last_synced_at)})
+                  </time>
+                  , so live records may have changed since.
+                </>
+              ) : (
+                "This is a snapshot of Airtable data, so live records may have changed since."
+              )}
+            </p>
+          )}
         </div>
 
         {operation.error ? (
@@ -281,21 +320,34 @@ function ApprovalView({
       </section>
 
       {operation.result ? <ResultPanel result={operation.result} /> : null}
+      {operation.schema_result ? <SchemaResultPanel result={operation.schema_result} /> : null}
 
       {hasOperations ? (
         <section className="preview-stack">
-          {operation.operations.map((item, index) => (
-            <OperationSection
-              key={`${item.type}-${item.table}-${index}`}
-              operation={item}
-              baseId={operation.base_id}
-              linked={operation.linked_records}
-            />
-          ))}
+          {isSchema
+            ? schemaOperations.map((item, index) => (
+                <SchemaPreview
+                  key={`${item.type}-${item.table_id ?? item.table_name}-${index}`}
+                  operation={item}
+                  baseId={operation.base_id}
+                />
+              ))
+            : operation.operations.map((item, index) => (
+                <OperationSection
+                  key={`${item.type}-${item.table}-${index}`}
+                  operation={item}
+                  baseId={operation.base_id}
+                  linked={operation.linked_records}
+                />
+              ))}
         </section>
       ) : (
         <section className="preview-card">
-          <p className="meta-text">This request doesn't change any records.</p>
+          <p className="meta-text">
+            {isSchema
+              ? "This request doesn't change the schema."
+              : "This request doesn't change any records."}
+          </p>
         </section>
       )}
     </main>
