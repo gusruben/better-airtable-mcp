@@ -3,7 +3,7 @@ tmp_dir = "tmp"
 
 [build]
   bin = "./tmp/better-airtable-mcp"
-  cmd = "npm --prefix frontend run build && go build -o ./tmp/better-airtable-mcp ./cmd/server"
+  cmd = "npm --prefix frontend run build && go build -buildvcs=false -o ./tmp/better-airtable-mcp ./cmd/server"
   delay = 1000
   exclude_dir = ["tmp", "data", "node_modules", "frontend/node_modules", "internal/approval/dist", ".git"]
   exclude_regex = ["_test\\.go$"]

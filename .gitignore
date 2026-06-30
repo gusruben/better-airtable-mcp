@@ -7,12 +7,16 @@
 .claude/
 frontend/node_modules/
 frontend/.vite/
+frontend/*.tsbuildinfo
 
 # Local environment and secrets
 .env
 .env.*
 !.env.example
 .direnv/
+
+# Local MCP client config
+.mcp.json
 
 # Local runtime data and caches
 data/
