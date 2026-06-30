@@ -709,13 +709,13 @@ export function McpDebugPage({
                 {busyOAuth ? "Connecting..." : "Connect with OAuth"}
               </button>
               <button
-                className="action-button approve"
+                className="action-button secondary"
                 disabled={busyConnect || bearerToken.trim() === ""}
                 onClick={() => {
                   void connectWithToken(bearerToken).catch(() => undefined);
                 }}
               >
-                {busyConnect ? "Loading..." : "Initialize + Load Tools"}
+                {busyConnect ? "Loading…" : "Initialize + load tools"}
               </button>
             </div>
             {oauthStatus ? <p className="meta-text debug-status">{oauthStatus}</p> : null}

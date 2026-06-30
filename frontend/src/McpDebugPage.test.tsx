@@ -228,7 +228,7 @@ describe("McpDebugPage", () => {
     });
     expect(callbackLocation.replace).toHaveBeenCalledWith("/debug");
 
-    fireEvent.click(screen.getByRole("button", { name: "Initialize + Load Tools" }));
+    fireEvent.click(screen.getByRole("button", { name: "Initialize + load tools" }));
 
     expect(await screen.findByText("Search for Airtable bases the user has access to.")).toBeInTheDocument();
     expect(screen.getByText("session_debug")).toBeInTheDocument();

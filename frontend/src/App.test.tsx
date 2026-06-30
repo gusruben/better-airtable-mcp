@@ -56,8 +56,10 @@ describe("App", () => {
 
     expect(await screen.findByText("Update 1 record in projects")).toBeInTheDocument();
     expect(screen.getByText("Claude (client_123)")).toBeInTheDocument();
-    expect(screen.getAllByText("Website Redesign")).toHaveLength(2);
+    // Only the changed field appears: status Planning -> Done. Unchanged "name" is folded away.
+    expect(screen.getByText("Planning")).toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
+    expect(screen.queryByText("Website Redesign")).toBeNull();
   });
 
   it("posts approval actions and refreshes the rendered status", async () => {
@@ -87,11 +89,7 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
 
     await waitFor(() => {
-      expect(
-        screen.getByText((content) =>
-          content.replace(/\s+/g, " ").includes("Status: completed"),
-        ),
-      ).toBeInTheDocument();
+      expect(screen.getByText("Changes applied")).toBeInTheDocument();
     });
 
     expect(fetchImpl).toHaveBeenNthCalledWith(
@@ -109,6 +107,6 @@ describe("App", () => {
     expect(screen.getByText("MCP Tool Debugger")).toBeInTheDocument();
     expect(screen.getByLabelText("Bearer Token")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Connect with OAuth" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Initialize + Load Tools" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Initialize + load tools" })).toBeDisabled();
   });
 });
