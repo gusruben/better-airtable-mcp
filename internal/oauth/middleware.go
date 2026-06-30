@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -16,8 +17,9 @@ import (
 )
 
 type Middleware struct {
-	store   *db.Store
-	limiter *RequestLimiter
+	store               *db.Store
+	limiter             *RequestLimiter
+	resourceMetadataURL string
 }
 
 type contextKey string
@@ -27,8 +29,15 @@ const tokenHashContextKey contextKey = "oauth_token_hash"
 const clientIDContextKey contextKey = "oauth_client_id"
 const clientNameContextKey contextKey = "oauth_client_name"
 
-func NewMiddleware(store *db.Store) *Middleware {
-	return NewMiddlewareWithRateLimit(store, 50, 50)
+// NewMiddleware builds the bearer-auth middleware. resourceMetadataURL is the
+// absolute URL of the RFC 9728 protected-resource metadata document; it is
+// advertised in the WWW-Authenticate challenge on 401s so MCP clients can
+// discover the authorization server and re-authenticate in place instead of
+// surfacing an opaque error.
+func NewMiddleware(store *db.Store, resourceMetadataURL string) *Middleware {
+	m := NewMiddlewareWithRateLimit(store, 50, 50)
+	m.resourceMetadataURL = resourceMetadataURL
+	return m
 }
 
 func NewMiddlewareWithRateLimit(store *db.Store, requestsPerSecond float64, burst int) *Middleware {
@@ -48,7 +57,7 @@ func (m *Middleware) RequireBearer(next http.Handler) http.Handler {
 				"error_kind", "auth",
 				"error_message", "missing bearer token",
 			)
-			httpx.WriteError(w, http.StatusUnauthorized, "missing bearer token")
+			m.writeUnauthorized(w, "", "missing bearer token")
 			return
 		}
 
@@ -61,7 +70,7 @@ func (m *Middleware) RequireBearer(next http.Handler) http.Handler {
 				"error_kind", "auth",
 				"error_message", "invalid or expired bearer token",
 			)
-			httpx.WriteError(w, http.StatusUnauthorized, "invalid or expired bearer token")
+			m.writeUnauthorized(w, "invalid_token", "invalid or expired bearer token")
 			return
 		}
 		if m.limiter != nil && !m.limiter.Allow(tokenHash) {
@@ -96,6 +105,26 @@ func (m *Middleware) RequireBearer(next http.Handler) http.Handler {
 		ctx = logx.WithLogger(ctx, logger)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// writeUnauthorized emits a 401 with an RFC 6750 / RFC 9728 WWW-Authenticate
+// challenge so MCP clients re-run the OAuth flow (reconnect in place) rather
+// than surfacing an opaque error. errCode is empty when no credentials were
+// presented (a missing token is not an invalid one).
+func (m *Middleware) writeUnauthorized(w http.ResponseWriter, errCode, message string) {
+	params := make([]string, 0, 3)
+	if errCode != "" {
+		params = append(params, fmt.Sprintf("error=%q", errCode), fmt.Sprintf("error_description=%q", message))
+	}
+	if m.resourceMetadataURL != "" {
+		params = append(params, fmt.Sprintf("resource_metadata=%q", m.resourceMetadataURL))
+	}
+	challenge := "Bearer"
+	if len(params) > 0 {
+		challenge += " " + strings.Join(params, ", ")
+	}
+	w.Header().Set("WWW-Authenticate", challenge)
+	httpx.WriteError(w, http.StatusUnauthorized, message)
 }
 
 func valueOrBlank(value *string) string {

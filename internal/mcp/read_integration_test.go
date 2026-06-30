@@ -157,7 +157,7 @@ func TestAuthenticatedReadToolsOverMCP(t *testing.T) {
 	}
 	runtime.SyncManager = syncer.NewManager(runtime.Syncer, store, runtime, cfg.SyncInterval, 10*time.Minute)
 
-	handler := oauth.NewMiddleware(store).RequireBearer(mcp.NewHandler("better-airtable-mcp", "0.1.0", tools.NewCatalog(cfg, runtime)))
+	handler := oauth.NewMiddleware(store, "").RequireBearer(mcp.NewHandler("better-airtable-mcp", "0.1.0", tools.NewCatalog(cfg, runtime)))
 
 	searchResponse := performAuthenticatedToolCall(t, handler, bearerToken, "list_bases", map[string]any{"query": "project"})
 	searchText := firstToolText(t, searchResponse)
@@ -386,7 +386,7 @@ func TestAuthenticatedReadToolsRejectCachedBaseWithoutAirtableAccess(t *testing.
 	}
 	runtime.SyncManager = syncer.NewManager(runtime.Syncer, store, runtime, cfg.SyncInterval, 10*time.Minute)
 
-	handler := oauth.NewMiddleware(store).RequireBearer(mcp.NewHandler("better-airtable-mcp", "0.1.0", tools.NewCatalog(cfg, runtime)))
+	handler := oauth.NewMiddleware(store, "").RequireBearer(mcp.NewHandler("better-airtable-mcp", "0.1.0", tools.NewCatalog(cfg, runtime)))
 
 	warmResponse := performAuthenticatedToolCall(t, handler, "mcp-access-token-user-1", "list_schema", map[string]any{
 		"base": "appProjects",
@@ -562,7 +562,7 @@ func TestCheckOperationRejectsSyncStatusWithoutAirtableAccess(t *testing.T) {
 	}
 	runtime.SyncManager = syncer.NewManager(runtime.Syncer, store, runtime, cfg.SyncInterval, 10*time.Minute)
 
-	handler := oauth.NewMiddleware(store).RequireBearer(mcp.NewHandler("better-airtable-mcp", "0.1.0", tools.NewCatalog(cfg, runtime)))
+	handler := oauth.NewMiddleware(store, "").RequireBearer(mcp.NewHandler("better-airtable-mcp", "0.1.0", tools.NewCatalog(cfg, runtime)))
 
 	syncResponse := performAuthenticatedToolCall(t, handler, "mcp-access-token-user-1", "sync", map[string]any{
 		"base": "appProjects",
@@ -728,7 +728,7 @@ func TestAuthenticatedQueryReportsTruncationWhenServerAppliesDefaultLimit(t *tes
 	}
 	runtime.SyncManager = syncer.NewManager(runtime.Syncer, store, runtime, cfg.SyncInterval, 10*time.Minute)
 
-	handler := oauth.NewMiddleware(store).RequireBearer(mcp.NewHandler("better-airtable-mcp", "0.1.0", tools.NewCatalog(cfg, runtime)))
+	handler := oauth.NewMiddleware(store, "").RequireBearer(mcp.NewHandler("better-airtable-mcp", "0.1.0", tools.NewCatalog(cfg, runtime)))
 
 	queryResponse := waitForToolResult(t, func() map[string]any {
 		return performAuthenticatedToolCall(t, handler, bearerToken, "query", map[string]any{

@@ -108,7 +108,7 @@ func main() {
 	}
 
 	mcpHandler := mcp.NewHandler("better-airtable-mcp", "0.1.0", tools.NewCatalog(cfg, toolRuntime))
-	middleware := oauth.NewMiddleware(store)
+	middleware := oauth.NewMiddleware(store, cfg.BaseURLString()+"/.well-known/oauth-protected-resource")
 	mux.Handle("/mcp", logx.Route("/mcp", middleware.RequireBearer(mcpHandler)))
 
 	oauthHandler := oauth.NewHandler(cfg, store, cipher, airtableOAuth)
