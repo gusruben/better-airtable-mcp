@@ -4,11 +4,17 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hackclub/better-airtable-mcp/internal/db"
 	"github.com/hackclub/better-airtable-mcp/internal/logx"
 	syncer "github.com/hackclub/better-airtable-mcp/internal/sync"
 )
+
+// schemaMetaFetchTimeout bounds the best-effort current-description lookup so a
+// rate-limited base (whose client backs off for many seconds) can never hang the
+// whole prepare. On timeout the old description is simply left blank.
+const schemaMetaFetchTimeout = 4 * time.Second
 
 const (
 	operationTypeRecord = "record_mutation"
@@ -61,16 +67,17 @@ type schemaPayload struct {
 }
 
 type schemaPayloadOp struct {
-	Type        string                  `json:"type"`
-	TableID     string                  `json:"table_id,omitempty"`
-	TableName   string                  `json:"table_name,omitempty"`
-	FieldID     string                  `json:"field_id,omitempty"`
-	FieldName   string                  `json:"field_name,omitempty"`
-	NewName     string                  `json:"new_name,omitempty"`
-	Description string                  `json:"description,omitempty"`
-	FieldType   string                  `json:"field_type,omitempty"`
-	Options     map[string]any          `json:"options,omitempty"`
-	Fields      []schemaPayloadFieldDef `json:"fields,omitempty"`
+	Type           string                  `json:"type"`
+	TableID        string                  `json:"table_id,omitempty"`
+	TableName      string                  `json:"table_name,omitempty"`
+	FieldID        string                  `json:"field_id,omitempty"`
+	FieldName      string                  `json:"field_name,omitempty"`
+	NewName        string                  `json:"new_name,omitempty"`
+	Description    string                  `json:"description,omitempty"`
+	OldDescription string                  `json:"old_description,omitempty"`
+	FieldType      string                  `json:"field_type,omitempty"`
+	Options        map[string]any          `json:"options,omitempty"`
+	Fields         []schemaPayloadFieldDef `json:"fields,omitempty"`
 }
 
 type schemaPayloadFieldDef struct {
@@ -82,16 +89,17 @@ type schemaPayloadFieldDef struct {
 
 // SchemaOperationPreview is the per-operation view the approval UI renders.
 type SchemaOperationPreview struct {
-	Type        string               `json:"type"`
-	TableID     string               `json:"table_id,omitempty"`
-	TableName   string               `json:"table_name,omitempty"`
-	FieldID     string               `json:"field_id,omitempty"`
-	FieldName   string               `json:"field_name,omitempty"`
-	NewName     string               `json:"new_name,omitempty"`
-	Description string               `json:"description,omitempty"`
-	FieldType   string               `json:"field_type,omitempty"`
-	Choices     []string             `json:"choices,omitempty"`
-	Fields      []SchemaFieldPreview `json:"fields,omitempty"`
+	Type           string               `json:"type"`
+	TableID        string               `json:"table_id,omitempty"`
+	TableName      string               `json:"table_name,omitempty"`
+	FieldID        string               `json:"field_id,omitempty"`
+	FieldName      string               `json:"field_name,omitempty"`
+	NewName        string               `json:"new_name,omitempty"`
+	Description    string               `json:"description,omitempty"`
+	OldDescription string               `json:"old_description,omitempty"`
+	FieldType      string               `json:"field_type,omitempty"`
+	Choices        []string             `json:"choices,omitempty"`
+	Fields         []SchemaFieldPreview `json:"fields,omitempty"`
 }
 
 type SchemaFieldPreview struct {
@@ -242,6 +250,30 @@ func (s *Service) PrepareSchemaMutation(ctx context.Context, userID string, requ
 		}
 	}
 
+	// For description edits, capture the current description so the preview can
+	// show old -> new (and "empty" when there was none). Best-effort: a meta
+	// fetch failure just leaves the old value blank.
+	if schemaHasDescriptionEdit(payload.Operations) {
+		metaCtx, cancel := context.WithTimeout(ctx, schemaMetaFetchTimeout)
+		metaTables, metaErr := s.writer.GetBaseSchema(metaCtx, accessToken, base.ID)
+		cancel()
+		if metaErr == nil {
+			tableDesc, fieldDesc := schemaDescriptionIndex(metaTables)
+			for i := range payload.Operations {
+				op := &payload.Operations[i]
+				if op.Description == "" {
+					continue
+				}
+				switch op.Type {
+				case schemaUpdateTable:
+					op.OldDescription = tableDesc[op.TableID]
+				case schemaUpdateField:
+					op.OldDescription = fieldDesc[op.FieldID]
+				}
+			}
+		}
+	}
+
 	payload.Summary = summarizeSchemaOperations(payload.Operations)
 	payloadCiphertext, err := s.encryptJSON(payload)
 	if err != nil {
@@ -323,15 +355,16 @@ func (s *Service) getSchemaOperationView(ctx context.Context, operation db.Pendi
 
 	for _, op := range payload.Operations {
 		preview := SchemaOperationPreview{
-			Type:        op.Type,
-			TableID:     op.TableID,
-			TableName:   op.TableName,
-			FieldID:     op.FieldID,
-			FieldName:   op.FieldName,
-			NewName:     op.NewName,
-			Description: op.Description,
-			FieldType:   op.FieldType,
-			Choices:     selectChoiceNames(op.Options),
+			Type:           op.Type,
+			TableID:        op.TableID,
+			TableName:      op.TableName,
+			FieldID:        op.FieldID,
+			FieldName:      op.FieldName,
+			NewName:        op.NewName,
+			Description:    op.Description,
+			OldDescription: op.OldDescription,
+			FieldType:      op.FieldType,
+			Choices:        selectChoiceNames(op.Options),
 		}
 		for _, field := range op.Fields {
 			preview.Fields = append(preview.Fields, SchemaFieldPreview{
@@ -565,6 +598,31 @@ func normalizeChoiceColors(options map[string]any) map[string]any {
 		choice["color"] = defaultChoiceColors[i%len(defaultChoiceColors)]
 	}
 	return options
+}
+
+// schemaHasDescriptionEdit reports whether any table/field rename-or-describe op
+// actually sets a description (the only case that needs the current value).
+func schemaHasDescriptionEdit(ops []schemaPayloadOp) bool {
+	for _, op := range ops {
+		if op.Description != "" && (op.Type == schemaUpdateTable || op.Type == schemaUpdateField) {
+			return true
+		}
+	}
+	return false
+}
+
+// schemaDescriptionIndex maps table and field IDs to their current descriptions,
+// from a freshly fetched base schema.
+func schemaDescriptionIndex(tables []syncer.Table) (map[string]string, map[string]string) {
+	tableDesc := make(map[string]string)
+	fieldDesc := make(map[string]string)
+	for _, table := range tables {
+		tableDesc[table.ID] = table.Description
+		for _, field := range table.Fields {
+			fieldDesc[field.ID] = field.Description
+		}
+	}
+	return tableDesc, fieldDesc
 }
 
 // selectChoiceNames pulls the choice names out of an Airtable select field's

@@ -26,6 +26,7 @@ type AirtableWriter interface {
 	CreateField(ctx context.Context, accessToken, baseID, tableID string, field syncer.FieldDefinition) (syncer.Field, error)
 	UpdateTable(ctx context.Context, accessToken, baseID, tableID, name, description string) (syncer.Table, error)
 	UpdateField(ctx context.Context, accessToken, baseID, tableID, fieldID, name, description string) (syncer.Field, error)
+	GetBaseSchema(ctx context.Context, accessToken, baseID string) ([]syncer.Table, error)
 }
 
 type Service struct {

@@ -85,15 +85,17 @@ type Base struct {
 }
 
 type Table struct {
-	ID     string  `json:"id"`
-	Name   string  `json:"name"`
-	Fields []Field `json:"fields"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description,omitempty"`
+	Fields      []Field `json:"fields"`
 }
 
 type Field struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Type string `json:"type"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
 }
 
 type Record struct {
@@ -112,9 +114,10 @@ type listBasesResponse struct {
 
 type baseSchemaResponse struct {
 	Tables []struct {
-		ID     string  `json:"id"`
-		Name   string  `json:"name"`
-		Fields []Field `json:"fields"`
+		ID          string  `json:"id"`
+		Name        string  `json:"name"`
+		Description string  `json:"description"`
+		Fields      []Field `json:"fields"`
 	} `json:"tables"`
 }
 
@@ -184,9 +187,10 @@ func (c *HTTPClient) GetBaseSchema(ctx context.Context, accessToken, baseID stri
 	tables := make([]Table, 0, len(payload.Tables))
 	for _, table := range payload.Tables {
 		tables = append(tables, Table{
-			ID:     table.ID,
-			Name:   table.Name,
-			Fields: table.Fields,
+			ID:          table.ID,
+			Name:        table.Name,
+			Description: table.Description,
+			Fields:      table.Fields,
 		})
 	}
 
