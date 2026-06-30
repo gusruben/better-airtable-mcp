@@ -1,15 +1,16 @@
 # Better Airtable MCP
 
-A better way to use Airtable with AI agents! There are 2 big features:
+A better way to use Airtable with AI agents! The big features:
 
 - SQL query support (backed by DuckDB)
-- Preview & approval flow for any record creation, modification, or deletions
+- Preview & approval flow for any record creation, modification, or deletion
+- Schema changes too: create and rename tables and fields (and edit their descriptions), behind that same approval flow
 
 **How to set up:**
 
 1. Go to https://claude.ai/customize/connectors
 2. Create a new Connector titled **Airtable** with this URL: https://better-airtable-mcp.hackclub.com/mcp
-3. Set permissions to "Always Allow" - `better-airtable-mcp` has an approval flow built-in and will prompt you before creating / modifying / delete records with a web interface
+3. Set permissions to "Always Allow" - `better-airtable-mcp` has an approval flow built-in and will prompt you in a web interface before it creates, modifies, or deletes records, or changes your base's schema
 
 ![Google Chrome](https://github.com/user-attachments/assets/5c463e4d-33ad-4f76-973c-a1437c3abfcb)
 
@@ -91,12 +92,20 @@ When running the app inside Docker Compose, the app container overrides `DATABAS
 
 ## Environment
 
-The server expects these environment variables:
+The server requires these environment variables:
 
 - `DATABASE_URL`
 - `AIRTABLE_CLIENT_ID`
 - `AIRTABLE_CLIENT_SECRET`
 - `BASE_URL`
-- `APP_ENCRYPTION_KEY`
+- `APP_ENCRYPTION_KEY` (must be exactly 32 bytes)
 
-Optional configuration currently matches the defaults described in `SPEC.md`.
+Optional, with defaults:
+
+- `PORT` (default `8080`)
+- `DUCKDB_DATA_DIR` (default `/data/duckdb`) - where per-base DuckDB cache files are stored
+- `SYNC_INTERVAL_SECONDS` (default `60`) and `SYNC_TTL_MINUTES` (default `10`)
+- `APPROVAL_TTL_MINUTES` (default `60`) - how long a pending approval stays valid
+- `QUERY_DEFAULT_LIMIT` (default `100`) and `QUERY_MAX_LIMIT` (default `1000`)
+
+These match the defaults described in `SPEC.md`.
