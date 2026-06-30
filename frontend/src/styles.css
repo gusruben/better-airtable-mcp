@@ -689,6 +689,81 @@ td.is-num {
   margin: 0;
 }
 
+/* Grouped field updates, rendered like Airtable's revision history: the old
+   name struck through in Airtable's removed-value orange (#ed5a23), the new
+   value in a light revision chip (#f9f9f9). No arrow — the strikethrough
+   carries the before/after the way the activity feed does. */
+.schema-revisions {
+  border: 1px solid var(--c-grid-line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.schema-revision {
+  padding: var(--space-2) var(--space-3);
+}
+.schema-revision + .schema-revision {
+  border-top: 1px solid var(--c-grid-line);
+}
+.schema-revision-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.rev-field {
+  font-weight: 500;
+  color: var(--c-text);
+}
+.rev-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  background: #f9f9f9;
+  border: 1px solid var(--c-grid-line);
+  font-size: 13px;
+}
+.rev-chip.is-removed {
+  text-decoration: line-through;
+  color: #ed5a23;
+}
+.rev-chip.is-added {
+  color: var(--c-text);
+  font-weight: 500;
+}
+.schema-revision-prop {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.schema-revision-name + .schema-revision-prop {
+  margin-top: var(--space-2);
+}
+.schema-revision > .schema-revision-prop:only-child {
+  margin-top: 0;
+}
+.rev-prop-label {
+  flex: 0 0 auto;
+  color: var(--c-muted);
+  font-size: 12px;
+  line-height: 22px;
+}
+/* old -> new value pair for a description change */
+.schema-prop-diff {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.rev-arrow {
+  color: var(--c-muted);
+}
+.rev-empty {
+  color: var(--c-muted);
+  font-style: italic;
+}
+
 /* Select choices shown as Airtable choice tokens; wraps and aligns whether in a
    definition row or under a type label in the create-table field list. */
 .schema-choices {

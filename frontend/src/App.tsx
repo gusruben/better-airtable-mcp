@@ -4,7 +4,7 @@ import { DeletePreview } from "./components/DeletePreview";
 import { DiffView } from "./components/DiffView";
 import { McpDebugPage } from "./McpDebugPage";
 import { RecordTable } from "./components/RecordTable";
-import { SchemaPreview } from "./components/SchemaPreview";
+import { SchemaOperationList } from "./components/SchemaPreview";
 import {
   BaseLink,
   absoluteTime,
@@ -325,13 +325,7 @@ function ApprovalView({
       {hasOperations ? (
         <section className="preview-stack">
           {isSchema
-            ? schemaOperations.map((item, index) => (
-                <SchemaPreview
-                  key={`${item.type}-${item.table_id ?? item.table_name}-${index}`}
-                  operation={item}
-                  baseId={operation.base_id}
-                />
-              ))
+            ? <SchemaOperationList operations={schemaOperations} baseId={operation.base_id} />
             : operation.operations.map((item, index) => (
                 <OperationSection
                   key={`${item.type}-${item.table}-${index}`}

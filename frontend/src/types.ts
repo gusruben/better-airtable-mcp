@@ -63,6 +63,7 @@ export interface SchemaOperationPreview {
   field_name?: string;
   new_name?: string;
   description?: string;
+  old_description?: string;
   field_type?: string;
   choices?: string[];
   fields?: SchemaFieldPreview[];
