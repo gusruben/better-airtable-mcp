@@ -318,12 +318,47 @@ type FieldDefinition struct {
 	Options     map[string]any `json:"options,omitempty"`
 }
 
+// readOnlyCreateOptions lists field-options keys that Airtable returns when
+// reading a field but rejects at creation time (INVALID_FIELD_TYPE_OPTIONS_FOR_CREATE),
+// keyed by field type. For multipleRecordLinks, create accepts only linkedTableId
+// (+ optional viewIdForRecordSelection); the rest are read-only.
+var readOnlyCreateOptions = map[string]map[string]struct{}{
+	"multipleRecordLinks": {
+		"isReversed":              {},
+		"prefersSingleRecordLink": {},
+		"inverseLinkFieldId":      {},
+	},
+}
+
+// sanitizeCreateOptions drops options that are read-only at field-creation time
+// for the given field type, so callers can pass a field's full (read-shaped)
+// options without tripping Airtable's create-only schema validation.
+func sanitizeCreateOptions(fieldType string, options map[string]any) map[string]any {
+	readOnly, ok := readOnlyCreateOptions[fieldType]
+	if !ok || len(options) == 0 {
+		return options
+	}
+	cleaned := make(map[string]any, len(options))
+	for k, v := range options {
+		if _, drop := readOnly[k]; drop {
+			continue
+		}
+		cleaned[k] = v
+	}
+	return cleaned
+}
+
 // CreateTable creates a new table in a base via the meta API. Airtable requires
 // at least one field, and the first field becomes the table's primary field.
 func (c *HTTPClient) CreateTable(ctx context.Context, accessToken, baseID, name, description string, fields []FieldDefinition) (Table, error) {
+	sanitized := make([]FieldDefinition, len(fields))
+	for i, f := range fields {
+		f.Options = sanitizeCreateOptions(f.Type, f.Options)
+		sanitized[i] = f
+	}
 	body := map[string]any{
 		"name":   name,
-		"fields": fields,
+		"fields": sanitized,
 	}
 	if strings.TrimSpace(description) != "" {
 		body["description"] = description
@@ -346,8 +381,8 @@ func (c *HTTPClient) CreateField(ctx context.Context, accessToken, baseID, table
 	if strings.TrimSpace(field.Description) != "" {
 		body["description"] = field.Description
 	}
-	if len(field.Options) > 0 {
-		body["options"] = field.Options
+	if opts := sanitizeCreateOptions(field.Type, field.Options); len(opts) > 0 {
+		body["options"] = opts
 	}
 
 	var created Field
