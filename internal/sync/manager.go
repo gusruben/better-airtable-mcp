@@ -77,6 +77,9 @@ type workerState struct {
 	pagesFetched         int64
 	recordsVisible       int64
 	recordsSyncedThisRun int64
+
+	lastFailedAt        time.Time
+	consecutiveFailures int
 }
 
 func NewManager(service *Service, store *db.Store, tokens TokenSource, interval, ttl time.Duration) *Manager {
@@ -424,6 +427,8 @@ func (w *workerState) run() {
 		w.lastCompletedAt = &completedAt
 		if err != nil {
 			w.lastError = err.Error()
+			w.lastFailedAt = completedAt
+			w.consecutiveFailures++
 			if w.readSnapshotComplete {
 				// A failed refresh should not block readers when a complete snapshot already exists.
 				// Fall back to the existing snapshot and retry on the normal schedule.
@@ -431,6 +436,8 @@ func (w *workerState) run() {
 			}
 		} else {
 			w.lastError = ""
+			w.lastFailedAt = time.Time{}
+			w.consecutiveFailures = 0
 			w.readable = true
 			w.readSnapshotComplete = true
 			w.needsInitialRefresh = false
@@ -454,11 +461,33 @@ func (w *workerState) nextAction(now time.Time) (shouldSync bool, waitFor time.D
 		return false, 0, ""
 	}
 
-	if !w.inProgress && (!duckdb.DatabaseFileExists(w.manager.service.basePath(w.baseID)) || w.syncRequested || w.needsInitialRefresh || (!w.readSnapshotComplete && (w.lastStartedAt.IsZero() || !now.Before(w.lastStartedAt.Add(w.manager.interval)))) || (w.readSnapshotComplete && (w.lastStartedAt.IsZero() || !now.Before(w.lastStartedAt.Add(w.manager.interval))))) {
-		w.inProgress = true
-		w.syncRequested = false
-		w.lastError = ""
-		return true, 0, w.syncTokenUserID
+	if !w.inProgress {
+		// A manual sync request always runs immediately, overriding any backoff.
+		if w.syncRequested {
+			w.inProgress = true
+			w.syncRequested = false
+			w.lastError = ""
+			return true, 0, w.syncTokenUserID
+		}
+
+		// After a failed run, wait out an exponential backoff before retrying so a
+		// persistent failure (inaccessible base, unwritable storage, repeated 429s)
+		// cannot spin against the Airtable API. This gates every automatic retry
+		// path below, including the "no snapshot file yet" case that would otherwise
+		// re-fire immediately.
+		if backoff := w.failureBackoff(); backoff > 0 {
+			if remaining := w.lastFailedAt.Add(backoff).Sub(now); remaining > 0 {
+				return false, minDuration(remaining, w.activeUntil.Sub(now)), ""
+			}
+		}
+
+		dueForRefresh := w.lastStartedAt.IsZero() || !now.Before(w.lastStartedAt.Add(w.manager.interval))
+		if !duckdb.DatabaseFileExists(w.manager.service.basePath(w.baseID)) || w.needsInitialRefresh || dueForRefresh {
+			w.inProgress = true
+			w.syncRequested = false
+			w.lastError = ""
+			return true, 0, w.syncTokenUserID
+		}
 	}
 
 	nextDue := w.activeUntil.Sub(now)
@@ -467,8 +496,44 @@ func (w *workerState) nextAction(now time.Time) (shouldSync bool, waitFor time.D
 			nextDue = dueIn
 		}
 	}
+	// Wake when the failure backoff expires, if that comes first.
+	if backoff := w.failureBackoff(); backoff > 0 {
+		if remaining := w.lastFailedAt.Add(backoff).Sub(now); remaining > 0 && remaining < nextDue {
+			nextDue = remaining
+		}
+	}
 
 	return false, nextDue, ""
+}
+
+const (
+	failureBackoffBase = 2 * time.Second
+	failureBackoffMax  = 5 * time.Minute
+)
+
+// failureBackoff returns how long to wait after the last failed run before the
+// next automatic retry, growing exponentially with consecutive failures and
+// capped at failureBackoffMax. Returns 0 when there is no active failure.
+// Callers must hold w.mu.
+func (w *workerState) failureBackoff() time.Duration {
+	if w.consecutiveFailures <= 0 || w.lastFailedAt.IsZero() {
+		return 0
+	}
+	backoff := failureBackoffBase
+	for i := 1; i < w.consecutiveFailures; i++ {
+		backoff *= 2
+		if backoff >= failureBackoffMax {
+			return failureBackoffMax
+		}
+	}
+	return backoff
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (w *workerState) cleanupExpired() {
