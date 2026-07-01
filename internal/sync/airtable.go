@@ -110,6 +110,7 @@ type listBasesResponse struct {
 		Name            string `json:"name"`
 		PermissionLevel string `json:"permissionLevel"`
 	} `json:"bases"`
+	Offset string `json:"offset"`
 }
 
 type baseSchemaResponse struct {
@@ -161,18 +162,34 @@ func NewHTTPClient(baseURL string, httpClient *http.Client) *HTTPClient {
 }
 
 func (c *HTTPClient) ListBases(ctx context.Context, accessToken string) ([]Base, error) {
-	var payload listBasesResponse
-	if err := c.doJSON(ctx, accessToken, http.MethodGet, "/v0/meta/bases", nil, nil, &payload); err != nil {
-		return nil, err
-	}
+	bases := make([]Base, 0)
+	offset := ""
 
-	bases := make([]Base, 0, len(payload.Bases))
-	for _, base := range payload.Bases {
-		bases = append(bases, Base{
-			ID:              base.ID,
-			Name:            base.Name,
-			PermissionLevel: base.PermissionLevel,
-		})
+	// Airtable returns at most 1000 bases per page and hands back an "offset" to
+	// fetch the next one. Follow it, or every base past #1000 silently vanishes.
+	for {
+		var query url.Values
+		if offset != "" {
+			query = url.Values{"offset": {offset}}
+		}
+
+		var payload listBasesResponse
+		if err := c.doJSON(ctx, accessToken, http.MethodGet, "/v0/meta/bases", query, nil, &payload); err != nil {
+			return nil, err
+		}
+
+		for _, base := range payload.Bases {
+			bases = append(bases, Base{
+				ID:              base.ID,
+				Name:            base.Name,
+				PermissionLevel: base.PermissionLevel,
+			})
+		}
+
+		if payload.Offset == "" {
+			break
+		}
+		offset = payload.Offset
 	}
 
 	return bases, nil
