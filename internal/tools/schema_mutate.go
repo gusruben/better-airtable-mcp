@@ -52,7 +52,24 @@ const (
 	// plainly and points at the honest alternatives the agent can choose.
 	schemaDeleteGuidance = "Airtable's API can't delete tables or fields. This tool won't fake a deletion by renaming or clearing things behind your back. If you want to retire a field or table, do it by hand in Airtable, or (if you choose to) rename it with update_table/update_field to mark it deprecated."
 	schemaRetypeGuidance = "Airtable's API can't change an existing field's type (update_field only changes name and description). To effectively change a type, create a new field with the type you want via create_field, migrate the values into it with the mutate tool, then remove the old field by hand in Airtable."
+
+	// uncreatableFieldTypesList is the human-readable form of
+	// uncreatableFieldTypes for messages.
+	uncreatableFieldTypesList = "createdTime, lastModifiedTime, createdBy, lastModifiedBy, autoNumber"
 )
+
+// uncreatableFieldTypes lists field types Airtable's meta API rejects at
+// creation time (UNSUPPORTED_FIELD_TYPE_FOR_CREATE). They are system-computed
+// and carry no configuration worth preserving, so the tool strips them from
+// requests with a warning instead of letting the approved operation fail
+// against Airtable; the fields can be added by hand in the Airtable UI.
+var uncreatableFieldTypes = map[string]struct{}{
+	"createdTime":      {},
+	"lastModifiedTime": {},
+	"createdBy":        {},
+	"lastModifiedBy":   {},
+	"autoNumber":       {},
+}
 
 // SchemaMutateTool implements the manage_schema MCP tool.
 type SchemaMutateTool struct {
@@ -67,7 +84,8 @@ func (SchemaMutateTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name: "manage_schema",
 		Description: "Request a schema change (create or rename tables and fields), subject to human approval. " +
-			"Airtable's API cannot delete tables/fields or change a field's type; this tool will tell you so rather than fake it.",
+			"Airtable's API cannot delete tables/fields or change a field's type; this tool will tell you so rather than fake it. " +
+			"System-computed field types (" + uncreatableFieldTypesList + ") cannot be created via the API either; requesting one strips it from the request with a warning, and it must be added by hand in the Airtable UI.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -158,6 +176,13 @@ func (t SchemaMutateTool) Call(ctx context.Context, raw json.RawMessage) (mcp.To
 		return mcp.ToolCallResult{}, err
 	}
 
+	input, warnings, guidance := stripUncreatableFields(input)
+	if guidance != "" {
+		return mcp.ErrorResult(guidance, map[string]any{
+			"reason": "unsupported_field_type_for_create",
+		}), nil
+	}
+
 	if t.runtime == nil || t.runtime.Approval == nil {
 		return mcp.ErrorResult("manage_schema approval flow is not configured; payload validation passed", map[string]any{
 			"base":            strings.TrimSpace(input.Base),
@@ -187,14 +212,64 @@ func (t SchemaMutateTool) Call(ctx context.Context, raw json.RawMessage) (mcp.To
 		"summary":               prepared.Summary,
 		"assistant_instruction": approvalURLAssistantInstruction,
 	}
+	headers := []string{"operation_id", "status", "approval_url", "expires_at", "summary", "assistant_instruction"}
+	if len(warnings) > 0 {
+		payload["warnings"] = strings.Join(warnings, "; ")
+		headers = append(headers, "warnings")
+	}
 	logToolCompleted(ctx, "manage_schema",
 		"user_id", userID,
 		"approval_operation_id_hash", logx.ApprovalOperationIDHash(prepared.OperationID),
 		"status", prepared.Status,
 	)
-	return textOnlyResult(formatSingleRowCSV([]string{
-		"operation_id", "status", "approval_url", "expires_at", "summary", "assistant_instruction",
-	}, payload), payload), nil
+	return textOnlyResult(formatSingleRowCSV(headers, payload), payload), nil
+}
+
+// stripUncreatableFields removes fields (and whole create_field operations)
+// whose type Airtable's API refuses to create, returning the cleaned input and
+// one warning per removal so the agent can relay the omission. If stripping
+// would leave a create_table with no fields, or the request with no operations
+// at all, it returns guidance to send back as an error result instead.
+func stripUncreatableFields(input SchemaInput) (SchemaInput, []string, string) {
+	var warnings []string
+	operations := make([]SchemaOperation, 0, len(input.Operations))
+	for _, op := range input.Operations {
+		switch strings.TrimSpace(op.Type) {
+		case schemaOpCreateTable:
+			kept := make([]SchemaFieldDef, 0, len(op.Fields))
+			for j, field := range op.Fields {
+				fieldType := strings.TrimSpace(field.Type)
+				if _, uncreatable := uncreatableFieldTypes[fieldType]; !uncreatable {
+					kept = append(kept, field)
+					continue
+				}
+				warning := fmt.Sprintf("stripped field %q from create_table %q: Airtable's API can't create %s fields; add it by hand in the Airtable UI after the table exists", field.Name, op.Name, fieldType)
+				if j == 0 {
+					warning += " (it was listed first, so the first remaining field becomes the table's primary field instead)"
+				}
+				warnings = append(warnings, warning)
+			}
+			if len(kept) == 0 {
+				return input, nil, fmt.Sprintf("create_table %q only asks for field types Airtable's API can't create (%s). Include at least one creatable field (for example singleLineText); the system-computed fields can then be added by hand in the Airtable UI.", op.Name, uncreatableFieldTypesList)
+			}
+			op.Fields = kept
+			operations = append(operations, op)
+		case schemaOpCreateField:
+			fieldType := strings.TrimSpace(op.FieldType)
+			if _, uncreatable := uncreatableFieldTypes[fieldType]; uncreatable {
+				warnings = append(warnings, fmt.Sprintf("dropped create_field %q on table %q: Airtable's API can't create %s fields; add it by hand in the Airtable UI instead", op.Name, op.Table, fieldType))
+				continue
+			}
+			operations = append(operations, op)
+		default:
+			operations = append(operations, op)
+		}
+	}
+	if len(operations) == 0 {
+		return input, nil, fmt.Sprintf("every requested operation asks for a field type Airtable's API can't create (%s), so there is nothing to submit for approval. Add these fields by hand in the Airtable UI instead.", uncreatableFieldTypesList)
+	}
+	input.Operations = operations
+	return input, warnings, ""
 }
 
 func toSchemaApprovalRequest(ctx context.Context, input SchemaInput) approval.SchemaMutationRequest {
