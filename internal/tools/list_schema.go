@@ -116,7 +116,7 @@ func (t ListSchemaTool) Call(ctx context.Context, raw json.RawMessage) (mcp.Tool
 			"duckdb_table_name":    table.DuckDBTableName,
 			"original_name":        table.OriginalName,
 			"fields":               fields,
-			"sample_rows":          table.SampleRows,
+			"sample_rows":          clampSampleRows(table.SampleRows),
 			"visible_record_count": table.VisibleRecordCount,
 			"total_record_count":   totalRecordCount,
 			"table_complete":       table.TableComplete,
