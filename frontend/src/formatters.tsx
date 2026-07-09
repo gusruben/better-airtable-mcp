@@ -552,8 +552,10 @@ function CheckboxGlyph({ checked }: { checked: boolean }) {
 }
 
 function formatDate(value: string): string {
+  // A bare date parses as UTC midnight, which toLocaleDateString renders as
+  // the previous day in timezones west of UTC; parse it as local time instead.
   return /^\d{4}-\d{2}-\d{2}$/.test(value)
-    ? new Date(value).toLocaleDateString()
+    ? new Date(`${value}T00:00:00`).toLocaleDateString()
     : new Date(value).toLocaleString();
 }
 

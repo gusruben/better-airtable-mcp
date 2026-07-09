@@ -6,7 +6,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
-    "test": "vitest run"
+    "test": "TZ=America/New_York vitest run"
   },
   "dependencies": {
     "react": "^19.0.0",

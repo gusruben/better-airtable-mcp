@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   collectFieldNames,
   countdownLabel,
+  formatFieldValue,
   getOperationIDFromPath,
 } from "./formatters";
 
@@ -18,6 +19,12 @@ describe("formatters", () => {
     expect(
       countdownLabel("2026-04-01T12:09:00Z", new Date("2026-04-01T12:09:00Z")),
     ).toBe("expired");
+  });
+
+  it("renders a bare date as the same calendar day in timezones west of UTC", () => {
+    // Tests run with TZ=America/New_York (see the test script); a UTC-midnight
+    // parse would render 2026-07-24 as the 23rd.
+    expect(formatFieldValue("2026-07-24")).toContain("24");
   });
 
   it("collects sorted unique field names from current and requested values", () => {
