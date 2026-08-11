@@ -28,6 +28,12 @@ interface AppProps {
   fetchImpl?: typeof fetch;
 }
 
+// Bound once at module scope. A default parameter would allocate a new function
+// on every render, which changes the identity of the effect dependency and
+// re-runs the operation fetch on every state update (including the once-a-second
+// countdown tick), hammering the endpoint until it rate limits.
+const defaultFetch: typeof fetch = (input, init) => window.fetch(input, init);
+
 function isDebugPath(pathname: string): boolean {
   return pathname === "/debug" || pathname === "/debug/";
 }
@@ -361,7 +367,7 @@ function MessageCard({ title, children }: { title: string; children: React.React
 
 export default function App({
   pathname = window.location.pathname,
-  fetchImpl = window.fetch.bind(window),
+  fetchImpl = defaultFetch,
 }: AppProps) {
   if (isDebugPath(pathname)) {
     return (

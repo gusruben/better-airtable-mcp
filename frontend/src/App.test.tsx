@@ -62,6 +62,27 @@ describe("App", () => {
     expect(screen.queryByText("Website Redesign")).toBeNull();
   });
 
+  it("fetches the operation once when using the default fetch", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => makeOperation(),
+    } satisfies Partial<Response>);
+    const original = window.fetch;
+    window.fetch = fetchImpl as unknown as typeof fetch;
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    try {
+      render(<App pathname="/approve/op_123" />);
+      await screen.findByText("Update 1 record in projects");
+      // The countdown re-renders every second; that must not re-trigger the load.
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      window.fetch = original;
+    }
+  });
+
   it("posts approval actions and refreshes the rendered status", async () => {
     const approved = makeOperation({
       status: "completed",

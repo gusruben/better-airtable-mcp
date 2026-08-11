@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
+// Bound once at module scope so the default keeps a stable identity across
+// renders; see the matching note in App.tsx.
+const defaultFetch: typeof fetch = (input, init) => window.fetch(input, init);
+
 interface McpDebugPageProps {
   fetchImpl?: typeof fetch;
   locationImpl?: DebugLocation;
@@ -334,7 +338,7 @@ function ToolCard({
 }
 
 export function McpDebugPage({
-  fetchImpl = window.fetch.bind(window),
+  fetchImpl = defaultFetch,
   locationImpl,
   storageImpl,
 }: McpDebugPageProps) {
