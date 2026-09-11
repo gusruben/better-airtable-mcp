@@ -28,13 +28,17 @@ WORKDIR /app
 
 COPY --from=go-build /out/better-airtable-mcp /app/better-airtable-mcp
 COPY --from=go-build /src/README.md /app/README.md
-RUN mkdir -p /data/duckdb && chown -R appuser:appuser /app /data
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod 0755 /app/docker-entrypoint.sh \
+  && mkdir -p /data/duckdb && chown -R appuser:appuser /app /data
 
-USER appuser
+# The entrypoint runs as root only long enough to chown DUCKDB_DATA_DIR (a
+# freshly provisioned volume mounts root-owned), then drops to appuser.
 ENV PORT=8080
 ENV DUCKDB_DATA_DIR=/data/duckdb
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:${PORT}/healthz || exit 1
 
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["/app/better-airtable-mcp"]
